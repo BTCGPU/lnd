@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/lightningnetwork/lnd/lnwallet"
+	"github.com/shelvenzhou/lnd/lnwallet"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 )
@@ -67,8 +67,9 @@ func (n *nodeSigner) SignDigestCompact(hash []byte) ([]byte, error) {
 	isCompressedKey := true
 
 	// btcec.SignCompact returns a pubkey-recoverable signature
-	sig, err := btcec.SignCompact(btcec.S256(), n.privKey, hash,
-		isCompressedKey)
+	sig, err := btcec.SignCompact(
+		btcec.S256(), n.privKey, hash, isCompressedKey,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("can't sign the hash: %v", err)
 	}

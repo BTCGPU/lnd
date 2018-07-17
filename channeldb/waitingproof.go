@@ -7,9 +7,9 @@ import (
 
 	"bytes"
 
-	"github.com/boltdb/bolt"
+	"github.com/coreos/bbolt"
 	"github.com/go-errors/errors"
-	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/shelvenzhou/lnd/lnwire"
 )
 
 var (

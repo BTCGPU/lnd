@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/shelvenzhou/lnd/lnwire"
 )
 
 var (

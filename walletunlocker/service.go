@@ -5,16 +5,17 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lightningnetwork/lnd/aezeed"
-	"github.com/lightningnetwork/lnd/lnrpc"
-	"github.com/lightningnetwork/lnd/lnwallet/btcwallet"
-	"github.com/lightningnetwork/lnd/macaroons"
 	"github.com/roasbeef/btcd/chaincfg"
 	"github.com/roasbeef/btcwallet/wallet"
+	"github.com/shelvenzhou/lnd/aezeed"
+	"github.com/shelvenzhou/lnd/keychain"
+	"github.com/shelvenzhou/lnd/lnrpc"
+	"github.com/shelvenzhou/lnd/lnwallet/btcwallet"
+	"github.com/shelvenzhou/lnd/macaroons"
 	"golang.org/x/net/context"
 )
 
-// WalletInitMsg is a message sent to the UnlockerService when a user wishes to
+// WalletInitMsg is a message sent by the UnlockerService when a user wishes to
 // set up the internal wallet for the first time. The user MUST provide a
 // passphrase, but is also able to provide their own source of entropy. If
 // provided, then this source of entropy will be used to generate the wallet's
@@ -27,6 +28,28 @@ type WalletInitMsg struct {
 	// WalletSeed is the deciphered cipher seed that the wallet should use
 	// to initialize itself.
 	WalletSeed *aezeed.CipherSeed
+
+	// RecoveryWindow is the address look-ahead used when restoring a seed
+	// with existing funds. A recovery window zero indicates that no
+	// recovery should be attempted, such as after the wallet's initial
+	// creation.
+	RecoveryWindow uint32
+}
+
+// WalletUnlockMsg is a message sent by the UnlockerService when a user wishes
+// to unlock the internal wallet after initial setup. The user can optionally
+// specify a recovery window, which will resume an interrupted rescan for used
+// addresses.
+type WalletUnlockMsg struct {
+	// Passphrase is the passphrase that will be used to encrypt the wallet
+	// itself. This MUST be at least 8 characters.
+	Passphrase []byte
+
+	// RecoveryWindow is the address look-ahead used when restoring a seed
+	// with existing funds. A recovery window zero indicates that no
+	// recovery should be attempted, such as after the wallet's initial
+	// creation, but before any addresses have been created.
+	RecoveryWindow uint32
 }
 
 // UnlockerService implements the WalletUnlocker service used to provide lnd
@@ -37,10 +60,10 @@ type UnlockerService struct {
 	// InitMsgs is a channel that carries all wallet init messages.
 	InitMsgs chan *WalletInitMsg
 
-	// UnlockPasswords is a channel where passwords provided by the rpc
+	// UnlockMsgs is a channel where unlock parameters provided by the rpc
 	// client to be used to unlock and decrypt an existing wallet will be
 	// sent.
-	UnlockPasswords chan []byte
+	UnlockMsgs chan *WalletUnlockMsg
 
 	chainDir  string
 	netParams *chaincfg.Params
@@ -52,10 +75,10 @@ func New(authSvc *macaroons.Service, chainDir string,
 	params *chaincfg.Params) *UnlockerService {
 
 	return &UnlockerService{
-		InitMsgs:        make(chan *WalletInitMsg, 1),
-		UnlockPasswords: make(chan []byte, 1),
-		chainDir:        chainDir,
-		netParams:       params,
+		InitMsgs:   make(chan *WalletInitMsg, 1),
+		UnlockMsgs: make(chan *WalletUnlockMsg, 1),
+		chainDir:   chainDir,
+		netParams:  params,
 	}
 }
 
@@ -73,7 +96,7 @@ func (u *UnlockerService) GenSeed(ctx context.Context,
 	// Before we start, we'll ensure that the wallet hasn't already created
 	// so we don't show a *new* seed to the user if one already exists.
 	netDir := btcwallet.NetworkDir(u.chainDir, u.netParams)
-	loader := wallet.NewLoader(u.netParams, netDir)
+	loader := wallet.NewLoader(u.netParams, netDir, 0)
 	walletExists, err := loader.WalletExists()
 	if err != nil {
 		return nil, err
@@ -107,8 +130,9 @@ func (u *UnlockerService) GenSeed(ctx context.Context,
 	// Now that we have our set of entropy, we'll create a new cipher seed
 	// instance.
 	//
-	// TODO(roasbeef): should use current keychain version here
-	cipherSeed, err := aezeed.New(0, &entropy, time.Now())
+	cipherSeed, err := aezeed.New(
+		keychain.KeyDerivationVersion, &entropy, time.Now(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -156,10 +180,17 @@ func (u *UnlockerService) InitWallet(ctx context.Context,
 			"at least 8 characters")
 	}
 
+	// Require that the recovery window be non-negative.
+	recoveryWindow := in.RecoveryWindow
+	if recoveryWindow < 0 {
+		return nil, fmt.Errorf("recovery window %d must be "+
+			"non-negative", recoveryWindow)
+	}
+
 	// We'll then open up the directory that will be used to store the
 	// wallet's files so we can check if the wallet already exists.
 	netDir := btcwallet.NetworkDir(u.chainDir, u.netParams)
-	loader := wallet.NewLoader(u.netParams, netDir)
+	loader := wallet.NewLoader(u.netParams, netDir, uint32(recoveryWindow))
 
 	walletExists, err := loader.WalletExists()
 	if err != nil {
@@ -198,8 +229,9 @@ func (u *UnlockerService) InitWallet(ctx context.Context,
 	// now send over the wallet password and the seed. This will allow the
 	// daemon to initialize itself and startup.
 	initMsg := &WalletInitMsg{
-		Passphrase: password,
-		WalletSeed: cipherSeed,
+		Passphrase:     password,
+		WalletSeed:     cipherSeed,
+		RecoveryWindow: uint32(recoveryWindow),
 	}
 
 	u.InitMsgs <- initMsg
@@ -208,13 +240,16 @@ func (u *UnlockerService) InitWallet(ctx context.Context,
 }
 
 // UnlockWallet sends the password provided by the incoming UnlockWalletRequest
-// over the UnlockPasswords channel in case it successfully decrypts an
-// existing wallet found in the chain's wallet database directory.
+// over the UnlockMsgs channel in case it successfully decrypts an existing
+// wallet found in the chain's wallet database directory.
 func (u *UnlockerService) UnlockWallet(ctx context.Context,
 	in *lnrpc.UnlockWalletRequest) (*lnrpc.UnlockWalletResponse, error) {
 
+	password := in.WalletPassword
+	recoveryWindow := uint32(in.RecoveryWindow)
+
 	netDir := btcwallet.NetworkDir(u.chainDir, u.netParams)
-	loader := wallet.NewLoader(u.netParams, netDir)
+	loader := wallet.NewLoader(u.netParams, netDir, recoveryWindow)
 
 	// Check if wallet already exists.
 	walletExists, err := loader.WalletExists()
@@ -228,7 +263,7 @@ func (u *UnlockerService) UnlockWallet(ctx context.Context,
 	}
 
 	// Try opening the existing wallet with the provided password.
-	_, err = loader.OpenExistingWallet(in.WalletPassword, false)
+	_, err = loader.OpenExistingWallet(password, false)
 	if err != nil {
 		// Could not open wallet, most likely this means that provided
 		// password was incorrect.
@@ -244,17 +279,22 @@ func (u *UnlockerService) UnlockWallet(ctx context.Context,
 
 	// Attempt to create a password for the macaroon service.
 	if u.authSvc != nil {
-		err = u.authSvc.CreateUnlock(&in.WalletPassword)
+		err = u.authSvc.CreateUnlock(&password)
 		if err != nil {
 			return nil, fmt.Errorf("unable to create/unlock "+
 				"macaroon store: %v", err)
 		}
 	}
 
+	walletUnlockMsg := &WalletUnlockMsg{
+		Passphrase:     password,
+		RecoveryWindow: recoveryWindow,
+	}
+
 	// At this point we was able to open the existing wallet with the
-	// provided password. We send the password over the UnlockPasswords
+	// provided password. We send the password over the UnlockMsgs
 	// channel, such that it can be used by lnd to open the wallet.
-	u.UnlockPasswords <- in.WalletPassword
+	u.UnlockMsgs <- walletUnlockMsg
 
 	return &lnrpc.UnlockWalletResponse{}, nil
 }

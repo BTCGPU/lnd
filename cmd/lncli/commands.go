@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -13,12 +14,13 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/awalterschulze/gographviz"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
-	"github.com/lightningnetwork/lnd/lnrpc"
+	"github.com/shelvenzhou/lnd/lnrpc"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcutil"
 	"github.com/urfave/cli"
@@ -32,6 +34,8 @@ import (
 // arguments.
 
 // TODO(roasbeef): expose all fee conf targets
+
+const defaultRecoveryWindow int32 = 250
 
 func printJSON(resp interface{}) {
 	b, err := json.Marshal(resp)
@@ -65,13 +69,27 @@ func printRespJSON(resp proto.Message) {
 func actionDecorator(f func(*cli.Context) error) func(*cli.Context) error {
 	return func(c *cli.Context) error {
 		if err := f(c); err != nil {
+			s, ok := status.FromError(err)
+
+			// If it's a command for the UnlockerService (like
+			// 'create' or 'unlock') but the wallet is already
+			// unlocked, then these methods aren't recognized any
+			// more because this service is shut down after
+			// successful unlock. That's why the code
+			// 'Unimplemented' means something different for these
+			// two commands.
+			if s.Code() == codes.Unimplemented &&
+				(c.Command.Name == "create" ||
+					c.Command.Name == "unlock") {
+				return fmt.Errorf("Wallet is already unlocked")
+			}
+
 			// lnd might be active, but not possible to contact
 			// using RPC if the wallet is encrypted. If we get
 			// error code Unimplemented, it means that lnd is
 			// running, but the RPC server is not active yet (only
 			// WalletUnlocker server active) and most likely this
 			// is because of an encrypted wallet.
-			s, ok := status.FromError(err)
 			if ok && s.Code() == codes.Unimplemented {
 				return fmt.Errorf("Wallet is encrypted. " +
 					"Please unlock using 'lncli unlock', " +
@@ -87,6 +105,7 @@ func actionDecorator(f func(*cli.Context) error) func(*cli.Context) error {
 
 var newAddressCommand = cli.Command{
 	Name:      "newaddress",
+	Category:  "Wallet",
 	Usage:     "Generates a new address.",
 	ArgsUsage: "address-type",
 	Description: `
@@ -129,7 +148,8 @@ func newAddress(ctx *cli.Context) error {
 
 var sendCoinsCommand = cli.Command{
 	Name:      "sendcoins",
-	Usage:     "Send bitcoin on-chain to an address",
+	Category:  "On-chain",
+	Usage:     "Send bitcoin on-chain to an address.",
 	ArgsUsage: "addr amt",
 	Description: `
 	Send amt coins in satoshis to the BASE58 encoded bitcoin address addr.
@@ -227,6 +247,7 @@ func sendCoins(ctx *cli.Context) error {
 
 var sendManyCommand = cli.Command{
 	Name:      "sendmany",
+	Category:  "On-chain",
 	Usage:     "Send bitcoin on-chain to multiple addresses.",
 	ArgsUsage: "send-json-string [--conf_target=N] [--sat_per_byte=P]",
 	Description: `
@@ -284,7 +305,8 @@ func sendMany(ctx *cli.Context) error {
 
 var connectCommand = cli.Command{
 	Name:      "connect",
-	Usage:     "Connect to a remote lnd peer",
+	Category:  "Peers",
+	Usage:     "Connect to a remote lnd peer.",
 	ArgsUsage: "<pubkey>@host",
 	Flags: []cli.Flag{
 		cli.BoolFlag{
@@ -329,7 +351,8 @@ func connectPeer(ctx *cli.Context) error {
 
 var disconnectCommand = cli.Command{
 	Name:      "disconnect",
-	Usage:     "Disconnect a remote lnd peer identified by public key",
+	Category:  "Peers",
+	Usage:     "Disconnect a remote lnd peer identified by public key.",
 	ArgsUsage: "<pubkey>",
 	Flags: []cli.Flag{
 		cli.StringFlag{
@@ -371,8 +394,9 @@ func disconnectPeer(ctx *cli.Context) error {
 
 // TODO(roasbeef): change default number of confirmations
 var openChannelCommand = cli.Command{
-	Name:  "openchannel",
-	Usage: "Open a channel to a node or an existing peer.",
+	Name:     "openchannel",
+	Category: "Channels",
+	Usage:    "Open a channel to a node or an existing peer.",
 	Description: `
 	Attempt to open a new channel to an existing peer with the key node-key
 	optionally blocking until the channel is 'open'.
@@ -436,6 +460,14 @@ var openChannelCommand = cli.Command{
 			Usage: "(optional) the minimum value we will require " +
 				"for incoming HTLCs on the channel",
 		},
+		cli.Uint64Flag{
+			Name: "remote_csv_delay",
+			Usage: "(optional) the number of blocks we will require " +
+				"our channel counterparty to wait before accessing " +
+				"its funds in case of unilateral close. If this is " +
+				"not set, we will scale the value according to the " +
+				"channel size",
+		},
 	},
 	Action: actionDecorator(openChannel),
 }
@@ -456,9 +488,10 @@ func openChannel(ctx *cli.Context) error {
 	}
 
 	req := &lnrpc.OpenChannelRequest{
-		TargetConf:  int32(ctx.Int64("conf_target")),
-		SatPerByte:  ctx.Int64("sat_per_byte"),
-		MinHtlcMsat: ctx.Int64("min_htlc_msat"),
+		TargetConf:     int32(ctx.Int64("conf_target")),
+		SatPerByte:     ctx.Int64("sat_per_byte"),
+		MinHtlcMsat:    ctx.Int64("min_htlc_msat"),
+		RemoteCsvDelay: uint32(ctx.Uint64("remote_csv_delay")),
 	}
 
 	switch {
@@ -597,21 +630,25 @@ func openChannel(ctx *cli.Context) error {
 // TODO(roasbeef): also allow short relative channel ID.
 
 var closeChannelCommand = cli.Command{
-	Name:  "closechannel",
-	Usage: "Close an existing channel.",
+	Name:     "closechannel",
+	Category: "Channels",
+	Usage:    "Close an existing channel.",
 	Description: `
-	Close an existing channel. The channel can be closed either cooperatively, 
+	Close an existing channel. The channel can be closed either cooperatively,
 	or unilaterally (--force).
-	
+
 	A unilateral channel closure means that the latest commitment
 	transaction will be broadcast to the network. As a result, any settled
-	funds will be time locked for a few blocks before they can be swept int
-	lnd's wallet.
+	funds will be time locked for a few blocks before they can be spent.
 
 	In the case of a cooperative closure, One can manually set the fee to
 	be used for the closing transaction via either the --conf_target or
 	--sat_per_byte arguments. This will be the starting value used during
-	fee negotiation.  This is optional.`,
+	fee negotiation. This is optional.
+
+	To view which funding_txids/output_indexes can be used for a channel close,
+	see the channel_point values within the listchannels command output.
+	The format for a channel_point is 'funding_txid:output_index'.`,
 	ArgsUsage: "funding_txid [output_index [time_limit]]",
 	Flags: []cli.Flag{
 		cli.StringFlag{
@@ -654,17 +691,10 @@ var closeChannelCommand = cli.Command{
 }
 
 func closeChannel(ctx *cli.Context) error {
-	ctxb := context.Background()
 	client, cleanUp := getClient(ctx)
 	defer cleanUp()
 
-	args := ctx.Args()
-	var (
-		txid string
-		err  error
-	)
-
-	// Show command help if no arguments provided
+	// Show command help if no arguments and flags were provided.
 	if ctx.NArg() == 0 && ctx.NumFlags() == 0 {
 		cli.ShowCommandHelp(ctx, "closechannel")
 		return nil
@@ -678,25 +708,27 @@ func closeChannel(ctx *cli.Context) error {
 		SatPerByte:   ctx.Int64("sat_per_byte"),
 	}
 
+	args := ctx.Args()
+
 	switch {
 	case ctx.IsSet("funding_txid"):
-		txid = ctx.String("funding_txid")
+		req.ChannelPoint.FundingTxid = &lnrpc.ChannelPoint_FundingTxidStr{
+			FundingTxidStr: ctx.String("funding_txid"),
+		}
 	case args.Present():
-		txid = args.First()
+		req.ChannelPoint.FundingTxid = &lnrpc.ChannelPoint_FundingTxidStr{
+			FundingTxidStr: args.First(),
+		}
 		args = args.Tail()
 	default:
 		return fmt.Errorf("funding txid argument missing")
-	}
-
-	req.ChannelPoint.FundingTxid = &lnrpc.ChannelPoint_FundingTxidStr{
-		FundingTxidStr: txid,
 	}
 
 	switch {
 	case ctx.IsSet("output_index"):
 		req.ChannelPoint.OutputIndex = uint32(ctx.Int("output_index"))
 	case args.Present():
-		index, err := strconv.ParseInt(args.First(), 10, 32)
+		index, err := strconv.ParseUint(args.First(), 10, 32)
 		if err != nil {
 			return fmt.Errorf("unable to decode output index: %v", err)
 		}
@@ -705,7 +737,46 @@ func closeChannel(ctx *cli.Context) error {
 		req.ChannelPoint.OutputIndex = 0
 	}
 
-	stream, err := client.CloseChannel(ctxb, req)
+	// After parsing the request, we'll spin up a goroutine that will
+	// retrieve the closing transaction ID when attempting to close the
+	// channel. We do this to because `executeChannelClose` can block, so we
+	// would like to present the closing transaction ID to the user as soon
+	// as it is broadcasted.
+	var wg sync.WaitGroup
+	txidChan := make(chan string, 1)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		printJSON(struct {
+			ClosingTxid string `json:"closing_txid"`
+		}{
+			ClosingTxid: <-txidChan,
+		})
+	}()
+
+	err := executeChannelClose(client, req, txidChan, ctx.Bool("block"))
+	if err != nil {
+		return err
+	}
+
+	// In the case that the user did not provide the `block` flag, then we
+	// need to wait for the goroutine to be done to prevent it from being
+	// destroyed when exiting before printing the closing transaction ID.
+	wg.Wait()
+
+	return nil
+}
+
+// executeChannelClose attempts to close the channel from a request. The closing
+// transaction ID is sent through `txidChan` as soon as it is broadcasted to the
+// network. The block boolean is used to determine if we should block until the
+// closing transaction receives all of its required confirmations.
+func executeChannelClose(client lnrpc.LightningClient, req *lnrpc.CloseChannelRequest,
+	txidChan chan<- string, block bool) error {
+
+	stream, err := client.CloseChannel(context.Background(), req)
 	if err != nil {
 		return err
 	}
@@ -726,36 +797,234 @@ func closeChannel(ctx *cli.Context) error {
 				return err
 			}
 
-			printJSON(struct {
-				ClosingTXID string `json:"closing_txid"`
-			}{
-				ClosingTXID: txid.String(),
-			})
+			txidChan <- txid.String()
 
-			if !ctx.Bool("block") {
+			if !block {
 				return nil
 			}
-
 		case *lnrpc.CloseStatusUpdate_ChanClose:
-			closingHash := update.ChanClose.ClosingTxid
-			txid, err := chainhash.NewHash(closingHash)
+			return nil
+		}
+	}
+}
+
+var closeAllChannelsCommand = cli.Command{
+	Name:     "closeallchannels",
+	Category: "Channels",
+	Usage:    "Close all existing channels.",
+	Description: `
+	Close all existing channels.
+
+	Channels will be closed either cooperatively or unilaterally, depending
+	on whether the channel is active or not. If the channel is inactive, any
+	settled funds within it will be time locked for a few blocks before they
+	can be spent.
+
+	One can request to close inactive channels only by using the
+	--inactive_only flag.
+
+	By default, one is prompted for confirmation every time an inactive
+	channel is requested to be closed. To avoid this, one can set the
+	--force flag, which will only prompt for confirmation once for all
+	inactive channels and proceed to close them.`,
+	Flags: []cli.Flag{
+		cli.BoolFlag{
+			Name:  "inactive_only",
+			Usage: "close inactive channels only",
+		},
+		cli.BoolFlag{
+			Name: "force",
+			Usage: "ask for confirmation once before attempting " +
+				"to close existing channels",
+		},
+	},
+	Action: actionDecorator(closeAllChannels),
+}
+
+func closeAllChannels(ctx *cli.Context) error {
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+
+	listReq := &lnrpc.ListChannelsRequest{}
+	openChannels, err := client.ListChannels(context.Background(), listReq)
+	if err != nil {
+		return fmt.Errorf("unable to fetch open channels: %v", err)
+	}
+
+	if len(openChannels.Channels) == 0 {
+		return errors.New("no open channels to close")
+	}
+
+	var channelsToClose []*lnrpc.Channel
+
+	switch {
+	case ctx.Bool("force") && ctx.Bool("inactive_only"):
+		msg := "Unilaterally close all inactive channels? The funds " +
+			"within these channels will be locked for some blocks " +
+			"(CSV delay) before they can be spent. (yes/no): "
+
+		confirmed := promptForConfirmation(msg)
+
+		// We can safely exit if the user did not confirm.
+		if !confirmed {
+			return nil
+		}
+
+		// Go through the list of open channels and only add inactive
+		// channels to the closing list.
+		for _, channel := range openChannels.Channels {
+			if !channel.GetActive() {
+				channelsToClose = append(
+					channelsToClose, channel,
+				)
+			}
+		}
+	case ctx.Bool("force"):
+		msg := "Close all active and inactive channels? Inactive " +
+			"channels will be closed unilaterally, so funds " +
+			"within them will be locked for a few blocks (CSV " +
+			"delay) before they can be spent. (yes/no): "
+
+		confirmed := promptForConfirmation(msg)
+
+		// We can safely exit if the user did not confirm.
+		if !confirmed {
+			return nil
+		}
+
+		channelsToClose = openChannels.Channels
+	default:
+		// Go through the list of open channels and determine which
+		// should be added to the closing list.
+		for _, channel := range openChannels.Channels {
+			// If the channel is inactive, we'll attempt to
+			// unilaterally close the channel, so we should prompt
+			// the user for confirmation beforehand.
+			if !channel.GetActive() {
+				msg := fmt.Sprintf("Unilaterally close channel "+
+					"with node %s and channel point %s? "+
+					"The closing transaction will need %d "+
+					"confirmations before the funds can be "+
+					"spent. (yes/no): ", channel.RemotePubkey,
+					channel.ChannelPoint, channel.CsvDelay)
+
+				confirmed := promptForConfirmation(msg)
+
+				if confirmed {
+					channelsToClose = append(
+						channelsToClose, channel,
+					)
+				}
+			} else if !ctx.Bool("inactive_only") {
+				// Otherwise, we'll only add active channels if
+				// we were not requested to close inactive
+				// channels only.
+				channelsToClose = append(
+					channelsToClose, channel,
+				)
+			}
+		}
+	}
+
+	// result defines the result of closing a channel. The closing
+	// transaction ID is populated if a channel is successfully closed.
+	// Otherwise, the error that prevented closing the channel is populated.
+	type result struct {
+		RemotePubKey string `json:"remote_pub_key"`
+		ChannelPoint string `json:"channel_point"`
+		ClosingTxid  string `json:"closing_txid"`
+		FailErr      string `json:"error"`
+	}
+
+	// Launch each channel closure in a goroutine in order to execute them
+	// in parallel. Once they're all executed, we will print the results as
+	// they come.
+	resultChan := make(chan result, len(channelsToClose))
+	for _, channel := range channelsToClose {
+		go func(channel *lnrpc.Channel) {
+			res := result{}
+			res.RemotePubKey = channel.RemotePubkey
+			res.ChannelPoint = channel.ChannelPoint
+			defer func() {
+				resultChan <- res
+			}()
+
+			// Parse the channel point in order to create the close
+			// channel request.
+			s := strings.Split(res.ChannelPoint, ":")
+			if len(s) != 2 {
+				res.FailErr = "expected channel point with " +
+					"format txid:index"
+				return
+			}
+			index, err := strconv.ParseUint(s[1], 10, 32)
 			if err != nil {
-				return err
+				res.FailErr = fmt.Sprintf("unable to parse "+
+					"channel point output index: %v", err)
+				return
 			}
 
-			printJSON(struct {
-				ClosingTXID string `json:"closing_txid"`
-			}{
-				ClosingTXID: txid.String(),
-			})
+			req := &lnrpc.CloseChannelRequest{
+				ChannelPoint: &lnrpc.ChannelPoint{
+					FundingTxid: &lnrpc.ChannelPoint_FundingTxidStr{
+						FundingTxidStr: s[0],
+					},
+					OutputIndex: uint32(index),
+				},
+				Force: !channel.GetActive(),
+			}
+
+			txidChan := make(chan string, 1)
+			err = executeChannelClose(client, req, txidChan, false)
+			if err != nil {
+				res.FailErr = fmt.Sprintf("unable to close "+
+					"channel: %v", err)
+				return
+			}
+
+			res.ClosingTxid = <-txidChan
+		}(channel)
+	}
+
+	for range channelsToClose {
+		res := <-resultChan
+		printJSON(res)
+	}
+
+	return nil
+}
+
+// promptForConfirmation continuously prompts the user for the message until
+// receiving a response of "yes" or "no" and returns their answer as a bool.
+func promptForConfirmation(msg string) bool {
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		fmt.Print(msg)
+
+		answer, err := reader.ReadString('\n')
+		if err != nil {
+			return false
+		}
+
+		answer = strings.ToLower(strings.TrimSpace(answer))
+
+		switch {
+		case answer == "yes":
+			return true
+		case answer == "no":
+			return false
+		default:
+			continue
 		}
 	}
 }
 
 var listPeersCommand = cli.Command{
-	Name:   "listpeers",
-	Usage:  "List all active, currently connected peers.",
-	Action: actionDecorator(listPeers),
+	Name:     "listpeers",
+	Category: "Peers",
+	Usage:    "List all active, currently connected peers.",
+	Action:   actionDecorator(listPeers),
 }
 
 func listPeers(ctx *cli.Context) error {
@@ -774,7 +1043,9 @@ func listPeers(ctx *cli.Context) error {
 }
 
 var createCommand = cli.Command{
-	Name: "create",
+	Name:     "create",
+	Category: "Startup",
+	Usage:    "Initialize a wallet when starting lnd for the first time.",
 	Description: `
 	The create command is used to initialize an lnd wallet from scratch for
 	the very first time. This is interactive command with one required
@@ -888,6 +1159,7 @@ mnemonicCheck:
 	var (
 		cipherSeedMnemonic []string
 		aezeedPass         []byte
+		recoveryWindow     int32
 	)
 	if hasMnemonic {
 		// We'll now prompt the user to enter in their 24-word
@@ -908,6 +1180,12 @@ mnemonicCheck:
 
 		fmt.Println()
 
+		if len(cipherSeedMnemonic) != 24 {
+			return fmt.Errorf("wrong cipher seed mnemonic "+
+				"length: got %v words, expecting %v words",
+				len(cipherSeedMnemonic), 24)
+		}
+
 		// Additionally, the user may have a passphrase, that will also
 		// need to be provided so the daemon can properly decipher the
 		// cipher seed.
@@ -920,7 +1198,37 @@ mnemonicCheck:
 
 		aezeedPass = []byte(passphrase)
 
-		fmt.Println()
+		for {
+			fmt.Println()
+			fmt.Printf("Input an optional address look-ahead "+
+				"used to scan for used keys (default %d): ",
+				defaultRecoveryWindow)
+
+			reader := bufio.NewReader(os.Stdin)
+			answer, err := reader.ReadString('\n')
+			if err != nil {
+				return err
+			}
+
+			fmt.Println()
+
+			answer = strings.TrimSpace(answer)
+
+			if len(answer) == 0 {
+				recoveryWindow = defaultRecoveryWindow
+				break
+			}
+
+			lookAhead, err := strconv.Atoi(answer)
+			if err != nil {
+				fmt.Println("Unable to parse recovery "+
+					"window: %v", err)
+				continue
+			}
+
+			recoveryWindow = int32(lookAhead)
+			break
+		}
 	} else {
 		// Otherwise, if the user doesn't have a mnemonic that they
 		// want to use, we'll generate a fresh one with the GenSeed
@@ -997,6 +1305,7 @@ mnemonicCheck:
 		WalletPassword:     pw1,
 		CipherSeedMnemonic: cipherSeedMnemonic,
 		AezeedPassphrase:   aezeedPass,
+		RecoveryWindow:     recoveryWindow,
 	}
 	if _, err := client.InitWallet(ctxb, req); err != nil {
 		return err
@@ -1008,13 +1317,25 @@ mnemonicCheck:
 }
 
 var unlockCommand = cli.Command{
-	Name: "unlock",
+	Name:     "unlock",
+	Category: "Startup",
+	Usage:    "Unlock an encrypted wallet at startup.",
 	Description: `
 	The unlock command is used to decrypt lnd's wallet state in order to
 	start up. This command MUST be run after booting up lnd before it's
 	able to carry out its duties. An exception is if a user is running with
 	--noencryptwallet, then a default passphrase will be used.
 	`,
+	Flags: []cli.Flag{
+		cli.IntFlag{
+			Name: "recovery_window",
+			Usage: "address lookahead to resume recovery rescan, " +
+				"value should be non-zero --  To recover all " +
+				"funds, this should be greater than the " +
+				"maximum number of consecutive, unused " +
+				"addresses ever generated by the wallet.",
+		},
+	},
 	Action: actionDecorator(unlock),
 }
 
@@ -1030,8 +1351,26 @@ func unlock(ctx *cli.Context) error {
 	}
 	fmt.Println()
 
+	args := ctx.Args()
+
+	// Parse the optional recovery window if it is specified. By default,
+	// the recovery window will be 0, indicating no lookahead should be
+	// used.
+	var recoveryWindow int32
+	switch {
+	case ctx.IsSet("recovery_window"):
+		recoveryWindow = int32(ctx.Int64("recovery_window"))
+	case args.Present():
+		window, err := strconv.ParseInt(args.First(), 10, 64)
+		if err != nil {
+			return err
+		}
+		recoveryWindow = int32(window)
+	}
+
 	req := &lnrpc.UnlockWalletRequest{
 		WalletPassword: pw,
+		RecoveryWindow: recoveryWindow,
 	}
 	_, err = client.UnlockWallet(ctxb, req)
 	if err != nil {
@@ -1044,9 +1383,10 @@ func unlock(ctx *cli.Context) error {
 }
 
 var walletBalanceCommand = cli.Command{
-	Name:   "walletbalance",
-	Usage:  "Compute and display the wallet's current balance",
-	Action: actionDecorator(walletBalance),
+	Name:     "walletbalance",
+	Category: "Wallet",
+	Usage:    "Compute and display the wallet's current balance.",
+	Action:   actionDecorator(walletBalance),
 }
 
 func walletBalance(ctx *cli.Context) error {
@@ -1065,9 +1405,11 @@ func walletBalance(ctx *cli.Context) error {
 }
 
 var channelBalanceCommand = cli.Command{
-	Name:   "channelbalance",
-	Usage:  "Returns the sum of the total available channel balance across all open channels",
-	Action: actionDecorator(channelBalance),
+	Name:     "channelbalance",
+	Category: "Channels",
+	Usage:    "Returns the sum of the total available channel balance across " +
+		"all open channels.",
+	Action:   actionDecorator(channelBalance),
 }
 
 func channelBalance(ctx *cli.Context) error {
@@ -1087,7 +1429,7 @@ func channelBalance(ctx *cli.Context) error {
 
 var getInfoCommand = cli.Command{
 	Name:   "getinfo",
-	Usage:  "Returns basic information related to the active daemon",
+	Usage:  "Returns basic information related to the active daemon.",
 	Action: actionDecorator(getInfo),
 }
 
@@ -1107,24 +1449,10 @@ func getInfo(ctx *cli.Context) error {
 }
 
 var pendingChannelsCommand = cli.Command{
-	Name:  "pendingchannels",
-	Usage: "Display information pertaining to pending channels",
-	Flags: []cli.Flag{
-		cli.BoolFlag{
-			Name:  "open, o",
-			Usage: "display the status of new pending channels",
-		},
-		cli.BoolFlag{
-			Name:  "close, c",
-			Usage: "display the status of channels being closed",
-		},
-		cli.BoolFlag{
-			Name: "all, a",
-			Usage: "display the status of channels in the " +
-				"process of being opened or closed",
-		},
-	},
-	Action: actionDecorator(pendingChannels),
+	Name:     "pendingchannels",
+	Category: "Channels",
+	Usage:    "Display information pertaining to pending channels.",
+	Action:   actionDecorator(pendingChannels),
 }
 
 func pendingChannels(ctx *cli.Context) error {
@@ -1144,12 +1472,25 @@ func pendingChannels(ctx *cli.Context) error {
 }
 
 var listChannelsCommand = cli.Command{
-	Name:  "listchannels",
-	Usage: "List all open channels",
+	Name:     "listchannels",
+	Category: "Channels",
+	Usage:    "List all open channels.",
 	Flags: []cli.Flag{
 		cli.BoolFlag{
-			Name:  "active_only, a",
+			Name:  "active_only",
 			Usage: "only list channels which are currently active",
+		},
+		cli.BoolFlag{
+			Name:  "inactive_only",
+			Usage: "only list channels which are currently inactive",
+		},
+		cli.BoolFlag{
+			Name:  "public_only",
+			Usage: "only list channels which are currently public",
+		},
+		cli.BoolFlag{
+			Name:  "private_only",
+			Usage: "only list channels which are currently private",
 		},
 	},
 	Action: actionDecorator(listChannels),
@@ -1160,7 +1501,13 @@ func listChannels(ctx *cli.Context) error {
 	client, cleanUp := getClient(ctx)
 	defer cleanUp()
 
-	req := &lnrpc.ListChannelsRequest{}
+	req := &lnrpc.ListChannelsRequest{
+		ActiveOnly:   ctx.Bool("active_only"),
+		InactiveOnly: ctx.Bool("inactive_only"),
+		PublicOnly:   ctx.Bool("public_only"),
+		PrivateOnly:  ctx.Bool("private_only"),
+	}
+
 	resp, err := client.ListChannels(ctxb, req)
 	if err != nil {
 		return err
@@ -1174,8 +1521,9 @@ func listChannels(ctx *cli.Context) error {
 }
 
 var sendPaymentCommand = cli.Command{
-	Name:  "sendpayment",
-	Usage: "Send a payment over lightning",
+	Name:     "sendpayment",
+	Category: "Payments",
+	Usage:    "Send a payment over lightning.",
 	Description: `
 	Send a payment over Lightning. One can either specify the full
 	parameters of the payment, or just use a payment request which encodes
@@ -1357,7 +1705,8 @@ func sendPaymentRequest(ctx *cli.Context, req *lnrpc.SendRequest) error {
 
 var payInvoiceCommand = cli.Command{
 	Name:      "payinvoice",
-	Usage:     "Pay an invoice over lightning",
+	Category:  "Payments",
+	Usage:     "Pay an invoice over lightning.",
 	ArgsUsage: "pay_req",
 	Flags: []cli.Flag{
 		cli.StringFlag{
@@ -1396,8 +1745,9 @@ func payInvoice(ctx *cli.Context) error {
 }
 
 var addInvoiceCommand = cli.Command{
-	Name:  "addinvoice",
-	Usage: "Add a new invoice.",
+	Name:     "addinvoice",
+	Category: "Payments",
+	Usage:    "Add a new invoice.",
 	Description: `
 	Add a new invoice, expressing intent for a future payment.
 
@@ -1444,6 +1794,12 @@ var addInvoiceCommand = cli.Command{
 			Usage: "the invoice's expiry time in seconds. If not " +
 				"specified an expiry of 3600 seconds (1 hour) " +
 				"is implied.",
+		},
+		cli.BoolTFlag{
+			Name: "private",
+			Usage: "encode routing hints in the invoice with " +
+				"private channels in order to assist the " +
+				"payer in reaching you",
 		},
 	},
 	Action: actionDecorator(addInvoice),
@@ -1503,6 +1859,7 @@ func addInvoice(ctx *cli.Context) error {
 		DescriptionHash: descHash,
 		FallbackAddr:    ctx.String("fallback_addr"),
 		Expiry:          ctx.Int64("expiry"),
+		Private:         ctx.Bool("private"),
 	}
 
 	resp, err := client.AddInvoice(context.Background(), invoice)
@@ -1523,6 +1880,7 @@ func addInvoice(ctx *cli.Context) error {
 
 var lookupInvoiceCommand = cli.Command{
 	Name:      "lookupinvoice",
+	Category:  "Payments",
 	Usage:     "Lookup an existing invoice by its payment hash.",
 	ArgsUsage: "rhash",
 	Flags: []cli.Flag{
@@ -1572,8 +1930,9 @@ func lookupInvoice(ctx *cli.Context) error {
 }
 
 var listInvoicesCommand = cli.Command{
-	Name:  "listinvoices",
-	Usage: "List all invoices currently stored.",
+	Name:     "listinvoices",
+	Category: "Payments",
+	Usage:    "List all invoices currently stored.",
 	Flags: []cli.Flag{
 		cli.BoolFlag{
 			Name: "pending_only",
@@ -1608,10 +1967,11 @@ func listInvoices(ctx *cli.Context) error {
 }
 
 var describeGraphCommand = cli.Command{
-	Name: "describegraph",
+	Name:     "describegraph",
+	Category: "Peers",
 	Description: "Prints a human readable version of the known channel " +
 		"graph from the PoV of the node",
-	Usage: "Describe the network graph",
+	Usage: "Describe the network graph.",
 	Flags: []cli.Flag{
 		cli.BoolFlag{
 			Name:  "render",
@@ -1643,7 +2003,7 @@ func describeGraph(ctx *cli.Context) error {
 }
 
 // normalizeFunc is a factory function which returns a function that normalizes
-// the capacity of of edges within the graph. The value of the returned
+// the capacity of edges within the graph. The value of the returned
 // function can be used to either plot the capacities, or to use a weight in a
 // rendering of the graph.
 func normalizeFunc(edges []*lnrpc.ChannelEdge, scaleFactor float64) func(int64) float64 {
@@ -1803,9 +2163,10 @@ func drawChannelGraph(graph *lnrpc.ChannelGraph) error {
 }
 
 var listPaymentsCommand = cli.Command{
-	Name:   "listpayments",
-	Usage:  "List all outgoing payments",
-	Action: actionDecorator(listPayments),
+	Name:     "listpayments",
+	Category: "Payments",
+	Usage:    "List all outgoing payments.",
+	Action:   actionDecorator(listPayments),
 }
 
 func listPayments(ctx *cli.Context) error {
@@ -1824,8 +2185,9 @@ func listPayments(ctx *cli.Context) error {
 }
 
 var getChanInfoCommand = cli.Command{
-	Name:  "getchaninfo",
-	Usage: "Get the state of a channel",
+	Name:     "getchaninfo",
+	Category: "Channels",
+	Usage:    "Get the state of a channel.",
 	Description: "Prints out the latest authenticated state for a " +
 		"particular channel",
 	ArgsUsage: "chan_id",
@@ -1871,8 +2233,9 @@ func getChanInfo(ctx *cli.Context) error {
 }
 
 var getNodeInfoCommand = cli.Command{
-	Name:  "getnodeinfo",
-	Usage: "Get information on a specific node.",
+	Name:     "getnodeinfo",
+	Category: "Peers",
+	Usage:    "Get information on a specific node.",
 	Description: "Prints out the latest authenticated node state for an " +
 		"advertised node",
 	Flags: []cli.Flag{
@@ -1917,6 +2280,7 @@ func getNodeInfo(ctx *cli.Context) error {
 
 var queryRoutesCommand = cli.Command{
 	Name:        "queryroutes",
+	Category:    "Payments",
 	Usage:       "Query a route to a destination.",
 	Description: "Queries the channel router for a potential path to the destination that has sufficient flow for the amount including fees",
 	ArgsUsage:   "dest amt",
@@ -1990,10 +2354,12 @@ func queryRoutes(ctx *cli.Context) error {
 }
 
 var getNetworkInfoCommand = cli.Command{
-	Name:  "getnetworkinfo",
-	Usage: "Getnetworkinfo",
-	Description: "Returns a set of statistics pertaining to the known channel " +
-		"graph",
+	Name:     "getnetworkinfo",
+	Category: "Channels",
+	Usage:    "Get statistical information about the current " +
+		"state of the network.",
+	Description: "Returns a set of statistics pertaining to the known " +
+		"channel graph",
 	Action: actionDecorator(getNetworkInfo),
 }
 
@@ -2016,7 +2382,7 @@ func getNetworkInfo(ctx *cli.Context) error {
 var debugLevelCommand = cli.Command{
 	Name:  "debuglevel",
 	Usage: "Set the debug level.",
-	Description: `Logging level for all subsystems {trace, debug, info, warn, error, critical}
+	Description: `Logging level for all subsystems {trace, debug, info, warn, error, critical, off}
 	You may also specify <subsystem>=<level>,<subsystem2>=<level>,... to set the log level for individual subsystems
 	
 	Use show to list available subsystems`,
@@ -2053,6 +2419,7 @@ func debugLevel(ctx *cli.Context) error {
 
 var decodePayReqCommand = cli.Command{
 	Name:        "decodepayreq",
+	Category:    "Payments",
 	Usage:       "Decode a payment request.",
 	Description: "Decode the passed payment request revealing the destination, payment hash and value of the payment request",
 	ArgsUsage:   "pay_req",
@@ -2094,6 +2461,7 @@ func decodePayReq(ctx *cli.Context) error {
 
 var listChainTxnsCommand = cli.Command{
 	Name:        "listchaintxns",
+	Category:    "On-chain",
 	Usage:       "List transactions from the wallet.",
 	Description: "List all transactions an address of the wallet was involved in.",
 	Action:      actionDecorator(listChainTxns),
@@ -2138,7 +2506,8 @@ func stopDaemon(ctx *cli.Context) error {
 
 var signMessageCommand = cli.Command{
 	Name:      "signmessage",
-	Usage:     "Sign a message with the node's private key",
+	Category:  "Wallet",
+	Usage:     "Sign a message with the node's private key.",
 	ArgsUsage: "msg",
 	Description: `
 	Sign msg with the resident node's private key. 
@@ -2181,7 +2550,8 @@ func signMessage(ctx *cli.Context) error {
 
 var verifyMessageCommand = cli.Command{
 	Name:      "verifymessage",
-	Usage:     "Verify a message signed with the signature",
+	Category:  "Wallet",
+	Usage:     "Verify a message signed with the signature.",
 	ArgsUsage: "msg signature",
 	Description: `
 	Verify that the message was signed with a properly-formed signature
@@ -2244,8 +2614,9 @@ func verifyMessage(ctx *cli.Context) error {
 }
 
 var feeReportCommand = cli.Command{
-	Name:  "feereport",
-	Usage: "Display the current fee policies of all active channels",
+	Name:     "feereport",
+	Category: "Channels",
+	Usage:    "Display the current fee policies of all active channels.",
 	Description: ` 
 	Returns the current fee policies of all active channels.
 	Fee policies can be updated using the updatechanpolicy command.`,
@@ -2269,7 +2640,9 @@ func feeReport(ctx *cli.Context) error {
 
 var updateChannelPolicyCommand = cli.Command{
 	Name:      "updatechanpolicy",
-	Usage:     "Update the channel policy for all channels, or a single channel",
+	Category:  "Channels",
+	Usage:     "Update the channel policy for all channels, or a single " +
+		"channel.",
 	ArgsUsage: "base_fee_msat fee_rate time_lock_delta [channel_point]",
 	Description: `
 	Updates the channel policy for all channels, or just a particular channel
@@ -2418,10 +2791,11 @@ func updateChannelPolicy(ctx *cli.Context) error {
 
 var forwardingHistoryCommand = cli.Command{
 	Name:      "fwdinghistory",
-	Usage:     "Query the history of all forwarded htlcs",
+	Category:  "Payments",
+	Usage:     "Query the history of all forwarded HTLCs.",
 	ArgsUsage: "start_time [end_time] [index_offset] [max_events]",
 	Description: `
-	Query the htlc switch's internal forwarding log for all completed
+	Query the HTLC switch's internal forwarding log for all completed
 	payment circuits (HTLCs) over a particular time range (--start_time and
 	--end_time). The start and end times are meant to be expressed in
 	seconds since the Unix epoch. If a start and end time aren't provided,

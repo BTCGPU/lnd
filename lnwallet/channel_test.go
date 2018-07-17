@@ -2,84 +2,22 @@ package lnwallet
 
 import (
 	"bytes"
+	"container/list"
 	"crypto/sha256"
-	"io/ioutil"
+	"fmt"
 
-	"os"
 	"reflect"
 	"runtime"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/lightningnetwork/lnd/chainntnfs"
-	"github.com/lightningnetwork/lnd/channeldb"
-	"github.com/lightningnetwork/lnd/keychain"
-	"github.com/lightningnetwork/lnd/lnwire"
-	"github.com/lightningnetwork/lnd/shachain"
 	"github.com/roasbeef/btcd/blockchain"
-	"github.com/roasbeef/btcd/btcec"
-	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcd/txscript"
 	"github.com/roasbeef/btcd/wire"
 	"github.com/roasbeef/btcutil"
+	"github.com/shelvenzhou/lnd/chainntnfs"
+	"github.com/shelvenzhou/lnd/lnwire"
 )
-
-var (
-	privPass = []byte("private-test")
-
-	// For simplicity a single priv key controls all of our test outputs.
-	testWalletPrivKey = []byte{
-		0x2b, 0xd8, 0x06, 0xc9, 0x7f, 0x0e, 0x00, 0xaf,
-		0x1a, 0x1f, 0xc3, 0x32, 0x8f, 0xa7, 0x63, 0xa9,
-		0x26, 0x97, 0x23, 0xc8, 0xdb, 0x8f, 0xac, 0x4f,
-		0x93, 0xaf, 0x71, 0xdb, 0x18, 0x6d, 0x6e, 0x90,
-	}
-
-	// We're alice :)
-	bobsPrivKey = []byte{
-		0x81, 0xb6, 0x37, 0xd8, 0xfc, 0xd2, 0xc6, 0xda,
-		0x63, 0x59, 0xe6, 0x96, 0x31, 0x13, 0xa1, 0x17,
-		0xd, 0xe7, 0x95, 0xe4, 0xb7, 0x25, 0xb8, 0x4d,
-		0x1e, 0xb, 0x4c, 0xfd, 0x9e, 0xc5, 0x8c, 0xe9,
-	}
-
-	// Use a hard-coded HD seed.
-	testHdSeed = chainhash.Hash{
-		0xb7, 0x94, 0x38, 0x5f, 0x2d, 0x1e, 0xf7, 0xab,
-		0x4d, 0x92, 0x73, 0xd1, 0x90, 0x63, 0x81, 0xb4,
-		0x4f, 0x2f, 0x6f, 0x25, 0x88, 0xa3, 0xef, 0xb9,
-		0x6a, 0x49, 0x18, 0x83, 0x31, 0x98, 0x47, 0x53,
-	}
-
-	// The number of confirmations required to consider any created channel
-	// open.
-	numReqConfs = uint16(1)
-)
-
-// initRevocationWindows simulates a new channel being opened within the p2p
-// network by populating the initial revocation windows of the passed
-// commitment state machines.
-//
-// TODO(roasbeef): rename!
-func initRevocationWindows(chanA, chanB *LightningChannel, windowSize int) error {
-	aliceNextRevoke, err := chanA.NextRevocationKey()
-	if err != nil {
-		return err
-	}
-	if err := chanB.InitNextRevocation(aliceNextRevoke); err != nil {
-		return err
-	}
-
-	bobNextRevoke, err := chanB.NextRevocationKey()
-	if err != nil {
-		return err
-	}
-	if err := chanA.InitNextRevocation(bobNextRevoke); err != nil {
-		return err
-	}
-
-	return nil
-}
 
 // forceStateTransition executes the necessary interaction between the two
 // commitment state machines to transition to a new state locking in any
@@ -102,7 +40,7 @@ func forceStateTransition(chanA, chanB *LightningChannel) error {
 		return err
 	}
 
-	if _, err := chanA.ReceiveRevocation(bobRevocation); err != nil {
+	if _, _, _, err := chanA.ReceiveRevocation(bobRevocation); err != nil {
 		return err
 	}
 	if err := chanA.ReceiveNewCommitment(bobSig, bobHtlcSigs); err != nil {
@@ -113,264 +51,11 @@ func forceStateTransition(chanA, chanB *LightningChannel) error {
 	if err != nil {
 		return err
 	}
-	if _, err := chanB.ReceiveRevocation(aliceRevocation); err != nil {
+	if _, _, _, err := chanB.ReceiveRevocation(aliceRevocation); err != nil {
 		return err
 	}
 
 	return nil
-}
-
-// createTestChannels creates two test lightning channels using the provided
-// notifier. The channel itself is funded with 10 BTC, with 5 BTC allocated to
-// each side. Within the channel, Alice is the initiator.
-func createTestChannels(revocationWindow int) (*LightningChannel,
-	*LightningChannel, func(), error) {
-
-	channelCapacity := btcutil.Amount(10 * 1e8)
-	channelBal := channelCapacity / 2
-	aliceDustLimit := btcutil.Amount(200)
-	bobDustLimit := btcutil.Amount(1300)
-	csvTimeoutAlice := uint32(5)
-	csvTimeoutBob := uint32(4)
-
-	prevOut := &wire.OutPoint{
-		Hash:  chainhash.Hash(testHdSeed),
-		Index: 0,
-	}
-	fundingTxIn := wire.NewTxIn(prevOut, nil, nil)
-
-	// For each party, we'll create a distinct set of keys in order to
-	// emulate the typical set up with live channels.
-	var (
-		aliceKeys []*btcec.PrivateKey
-		bobKeys   []*btcec.PrivateKey
-	)
-	for i := 0; i < 5; i++ {
-		key := make([]byte, len(testWalletPrivKey))
-		copy(key[:], testWalletPrivKey[:])
-		key[0] ^= byte(i + 1)
-
-		aliceKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), key)
-		aliceKeys = append(aliceKeys, aliceKey)
-
-		key = make([]byte, len(bobsPrivKey))
-		copy(key[:], bobsPrivKey)
-		key[0] ^= byte(i + 1)
-
-		bobKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), key)
-		bobKeys = append(bobKeys, bobKey)
-	}
-
-	aliceCfg := channeldb.ChannelConfig{
-		ChannelConstraints: channeldb.ChannelConstraints{
-			DustLimit:        aliceDustLimit,
-			MaxPendingAmount: lnwire.NewMSatFromSatoshis(channelCapacity),
-			ChanReserve:      channelCapacity / 100,
-			MinHTLC:          0,
-			MaxAcceptedHtlcs: MaxHTLCNumber / 2,
-		},
-		CsvDelay: uint16(csvTimeoutAlice),
-		MultiSigKey: keychain.KeyDescriptor{
-			PubKey: aliceKeys[0].PubKey(),
-		},
-		RevocationBasePoint: keychain.KeyDescriptor{
-			PubKey: aliceKeys[1].PubKey(),
-		},
-		PaymentBasePoint: keychain.KeyDescriptor{
-			PubKey: aliceKeys[2].PubKey(),
-		},
-		DelayBasePoint: keychain.KeyDescriptor{
-			PubKey: aliceKeys[3].PubKey(),
-		},
-		HtlcBasePoint: keychain.KeyDescriptor{
-			PubKey: aliceKeys[4].PubKey(),
-		},
-	}
-	bobCfg := channeldb.ChannelConfig{
-		ChannelConstraints: channeldb.ChannelConstraints{
-			DustLimit:        bobDustLimit,
-			MaxPendingAmount: lnwire.NewMSatFromSatoshis(channelCapacity),
-			ChanReserve:      channelCapacity / 100,
-			MinHTLC:          0,
-			MaxAcceptedHtlcs: MaxHTLCNumber / 2,
-		},
-		CsvDelay: uint16(csvTimeoutBob),
-		MultiSigKey: keychain.KeyDescriptor{
-			PubKey: bobKeys[0].PubKey(),
-		},
-		RevocationBasePoint: keychain.KeyDescriptor{
-			PubKey: bobKeys[1].PubKey(),
-		},
-		PaymentBasePoint: keychain.KeyDescriptor{
-			PubKey: bobKeys[2].PubKey(),
-		},
-		DelayBasePoint: keychain.KeyDescriptor{
-			PubKey: bobKeys[3].PubKey(),
-		},
-		HtlcBasePoint: keychain.KeyDescriptor{
-			PubKey: bobKeys[4].PubKey(),
-		},
-	}
-
-	bobRoot, err := chainhash.NewHash(bobKeys[0].Serialize())
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	bobPreimageProducer := shachain.NewRevocationProducer(*bobRoot)
-	bobFirstRevoke, err := bobPreimageProducer.AtIndex(0)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	bobCommitPoint := ComputeCommitmentPoint(bobFirstRevoke[:])
-
-	aliceRoot, err := chainhash.NewHash(aliceKeys[0].Serialize())
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	alicePreimageProducer := shachain.NewRevocationProducer(*aliceRoot)
-	aliceFirstRevoke, err := alicePreimageProducer.AtIndex(0)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	aliceCommitPoint := ComputeCommitmentPoint(aliceFirstRevoke[:])
-
-	aliceCommitTx, bobCommitTx, err := CreateCommitmentTxns(channelBal,
-		channelBal, &aliceCfg, &bobCfg, aliceCommitPoint, bobCommitPoint,
-		*fundingTxIn)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	alicePath, err := ioutil.TempDir("", "alicedb")
-	dbAlice, err := channeldb.Open(alicePath)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	bobPath, err := ioutil.TempDir("", "bobdb")
-	dbBob, err := channeldb.Open(bobPath)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	estimator := &StaticFeeEstimator{24}
-	feePerVSize, err := estimator.EstimateFeePerVSize(1)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	feePerKw := feePerVSize.FeePerKWeight()
-	commitFee := calcStaticFee(0)
-
-	aliceCommit := channeldb.ChannelCommitment{
-		CommitHeight:  0,
-		LocalBalance:  lnwire.NewMSatFromSatoshis(channelBal - commitFee),
-		RemoteBalance: lnwire.NewMSatFromSatoshis(channelBal),
-		CommitFee:     commitFee,
-		FeePerKw:      btcutil.Amount(feePerKw),
-		CommitTx:      aliceCommitTx,
-		CommitSig:     bytes.Repeat([]byte{1}, 71),
-	}
-	bobCommit := channeldb.ChannelCommitment{
-		CommitHeight:  0,
-		LocalBalance:  lnwire.NewMSatFromSatoshis(channelBal),
-		RemoteBalance: lnwire.NewMSatFromSatoshis(channelBal - commitFee),
-		CommitFee:     commitFee,
-		FeePerKw:      btcutil.Amount(feePerKw),
-		CommitTx:      bobCommitTx,
-		CommitSig:     bytes.Repeat([]byte{1}, 71),
-	}
-
-	aliceChannelState := &channeldb.OpenChannel{
-		LocalChanCfg:            aliceCfg,
-		RemoteChanCfg:           bobCfg,
-		IdentityPub:             aliceKeys[0].PubKey(),
-		FundingOutpoint:         *prevOut,
-		ChanType:                channeldb.SingleFunder,
-		IsInitiator:             true,
-		Capacity:                channelCapacity,
-		RemoteCurrentRevocation: bobCommitPoint,
-		RevocationProducer:      alicePreimageProducer,
-		RevocationStore:         shachain.NewRevocationStore(),
-		LocalCommitment:         aliceCommit,
-		RemoteCommitment:        aliceCommit,
-		Db:                      dbAlice,
-	}
-	bobChannelState := &channeldb.OpenChannel{
-		LocalChanCfg:            bobCfg,
-		RemoteChanCfg:           aliceCfg,
-		IdentityPub:             bobKeys[0].PubKey(),
-		FundingOutpoint:         *prevOut,
-		ChanType:                channeldb.SingleFunder,
-		IsInitiator:             false,
-		Capacity:                channelCapacity,
-		RemoteCurrentRevocation: aliceCommitPoint,
-		RevocationProducer:      bobPreimageProducer,
-		RevocationStore:         shachain.NewRevocationStore(),
-		LocalCommitment:         bobCommit,
-		RemoteCommitment:        bobCommit,
-		Db:                      dbBob,
-	}
-
-	aliceSigner := &mockSigner{privkeys: aliceKeys}
-	bobSigner := &mockSigner{privkeys: bobKeys}
-
-	pCache := &mockPreimageCache{
-		// hash -> preimage
-		preimageMap: make(map[[32]byte][]byte),
-	}
-
-	// TODO(roasbeef): make mock version of pre-image store
-	channelAlice, err := NewLightningChannel(
-		aliceSigner, pCache, aliceChannelState,
-	)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	channelBob, err := NewLightningChannel(
-		bobSigner, pCache, bobChannelState,
-	)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	if err := channelAlice.channelState.FullSync(); err != nil {
-		return nil, nil, nil, err
-	}
-	if err := channelBob.channelState.FullSync(); err != nil {
-		return nil, nil, nil, err
-	}
-
-	cleanUpFunc := func() {
-		os.RemoveAll(bobPath)
-		os.RemoveAll(alicePath)
-
-		channelAlice.Stop()
-		channelBob.Stop()
-	}
-
-	// Now that the channel are open, simulate the start of a session by
-	// having Alice and Bob extend their revocation windows to each other.
-	err = initRevocationWindows(channelAlice, channelBob, revocationWindow)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	return channelAlice, channelBob, cleanUpFunc, nil
-}
-
-// calcStaticFee calculates appropriate fees for commitment transactions.  This
-// function provides a simple way to allow test balance assertions to take fee
-// calculations into account.
-//
-// TODO(bvu): Refactor when dynamic fee estimation is added.
-func calcStaticFee(numHTLCs int) btcutil.Amount {
-	const (
-		commitWeight = btcutil.Amount(724)
-		htlcWeight   = 172
-		feePerKw     = btcutil.Amount(24/4) * 1000
-	)
-	return feePerKw * (commitWeight +
-		btcutil.Amount(htlcWeight*numHTLCs)) / 1000
 }
 
 // createHTLC is a utility function for generating an HTLC with a given
@@ -418,7 +103,7 @@ func TestSimpleAddSettleWorkflow(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -436,7 +121,7 @@ func TestSimpleAddSettleWorkflow(t *testing.T) {
 	// First Alice adds the outgoing HTLC to her local channel's state
 	// update log. Then Alice sends this wire message over to Bob who adds
 	// this htlc to his remote state update log.
-	aliceHtlcIndex, err := aliceChannel.AddHTLC(htlc)
+	aliceHtlcIndex, err := aliceChannel.AddHTLC(htlc, nil)
 	if err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
@@ -482,10 +167,17 @@ func TestSimpleAddSettleWorkflow(t *testing.T) {
 	// Alice then processes this revocation, sending her own revocation for
 	// her prior commitment transaction. Alice shouldn't have any HTLCs to
 	// forward since she's sending an outgoing HTLC.
-	if htlcs, err := aliceChannel.ReceiveRevocation(bobRevocation); err != nil {
+	fwdPkg, _, _, err := aliceChannel.ReceiveRevocation(bobRevocation)
+	if err != nil {
 		t.Fatalf("alice unable to process bob's revocation: %v", err)
-	} else if len(htlcs) != 0 {
-		t.Fatalf("alice forwards %v htlcs, should forward none: ", len(htlcs))
+	}
+	if len(fwdPkg.Adds) != 0 {
+		t.Fatalf("alice forwards %v add htlcs, should forward none",
+			len(fwdPkg.Adds))
+	}
+	if len(fwdPkg.SettleFails) != 0 {
+		t.Fatalf("alice forwards %v settle/fail htlcs, "+
+			"should forward none", len(fwdPkg.SettleFails))
 	}
 
 	// Alice then processes bob's signature, and since she just received
@@ -506,11 +198,17 @@ func TestSimpleAddSettleWorkflow(t *testing.T) {
 	// is fully locked in within both commitment transactions. Bob should
 	// also be able to forward an HTLC now that the HTLC has been locked
 	// into both commitment transactions.
-	if htlcs, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
+	fwdPkg, _, _, err = bobChannel.ReceiveRevocation(aliceRevocation)
+	if err != nil {
 		t.Fatalf("bob unable to process alice's revocation: %v", err)
-	} else if len(htlcs) != 1 {
-		t.Fatalf("bob should be able to forward an HTLC, instead can "+
-			"forward %v", len(htlcs))
+	}
+	if len(fwdPkg.Adds) != 1 {
+		t.Fatalf("bob forwards %v add htlcs, should only forward one",
+			len(fwdPkg.Adds))
+	}
+	if len(fwdPkg.SettleFails) != 0 {
+		t.Fatalf("bob forwards %v settle/fail htlcs, "+
+			"should forward none", len(fwdPkg.SettleFails))
 	}
 
 	// At this point, both sides should have the proper number of satoshis
@@ -567,7 +265,7 @@ func TestSimpleAddSettleWorkflow(t *testing.T) {
 	// HTLC once he learns of the preimage.
 	var preimage [32]byte
 	copy(preimage[:], paymentPreimage)
-	err = bobChannel.SettleHTLC(preimage, bobHtlcIndex)
+	err = bobChannel.SettleHTLC(preimage, bobHtlcIndex, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("bob unable to settle inbound htlc: %v", err)
 	}
@@ -595,12 +293,19 @@ func TestSimpleAddSettleWorkflow(t *testing.T) {
 		t.Fatalf("alice unable to sign new commitment: %v", err)
 	}
 
-	if htlcs, err := bobChannel.ReceiveRevocation(aliceRevocation2); err != nil {
+	fwdPkg, _, _, err = bobChannel.ReceiveRevocation(aliceRevocation2)
+	if err != nil {
 		t.Fatalf("bob unable to process alice's revocation: %v", err)
-	} else if len(htlcs) != 0 {
-		t.Fatalf("bob shouldn't forward any HTLCs after outgoing settle, "+
-			"instead can forward: %v", spew.Sdump(htlcs))
 	}
+	if len(fwdPkg.Adds) != 0 {
+		t.Fatalf("bob forwards %v add htlcs, should forward none",
+			len(fwdPkg.Adds))
+	}
+	if len(fwdPkg.SettleFails) != 0 {
+		t.Fatalf("bob forwards %v settle/fail htlcs, "+
+			"should forward none", len(fwdPkg.SettleFails))
+	}
+
 	err = bobChannel.ReceiveNewCommitment(aliceSig2, aliceHtlcSigs2)
 	if err != nil {
 		t.Fatalf("bob unable to process alice's new commitment: %v", err)
@@ -610,20 +315,26 @@ func TestSimpleAddSettleWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bob unable to revoke commitment: %v", err)
 	}
-
-	if htlcs, err := aliceChannel.ReceiveRevocation(bobRevocation2); err != nil {
+	fwdPkg, _, _, err = aliceChannel.ReceiveRevocation(bobRevocation2)
+	if err != nil {
 		t.Fatalf("alice unable to process bob's revocation: %v", err)
-	} else if len(htlcs) != 1 {
+	}
+	if len(fwdPkg.Adds) != 0 {
 		// Alice should now be able to forward the settlement HTLC to
 		// any down stream peers.
-		t.Fatalf("alice should be able to forward a single HTLC, "+
-			"instead can forward %v: %v", len(htlcs), spew.Sdump(htlcs))
+		t.Fatalf("alice should be forwarding an add HTLC, "+
+			"instead forwarding %v: %v", len(fwdPkg.Adds),
+			spew.Sdump(fwdPkg.Adds))
+	}
+	if len(fwdPkg.SettleFails) != 1 {
+		t.Fatalf("alice should be forwarding one settle/fails HTLC, "+
+			"instead forwarding: %v", len(fwdPkg.SettleFails))
 	}
 
 	// At this point, Bob should have 6 BTC settled, with Alice still having
 	// 4 BTC. Alice's channel should show 1 BTC sent and Bob's channel
 	// should show 1 BTC received. They should also be at commitment height
-	// two, with the revocation window extended by by 1 (5).
+	// two, with the revocation window extended by 1 (5).
 	mSatTransferred := lnwire.NewMSatFromSatoshis(btcutil.SatoshiPerBitcoin)
 	if aliceChannel.channelState.TotalMSatSent != mSatTransferred {
 		t.Fatalf("alice satoshis sent incorrect %v vs %v expected",
@@ -702,7 +413,7 @@ func TestCheckCommitTxSize(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -718,7 +429,7 @@ func TestCheckCommitTxSize(t *testing.T) {
 	for i := 0; i <= 10; i++ {
 		htlc, _ := createHTLC(i, lnwire.MilliSatoshi(1e7))
 
-		if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+		if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 			t.Fatalf("alice unable to add htlc: %v", err)
 		}
 		if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
@@ -737,7 +448,7 @@ func TestCheckCommitTxSize(t *testing.T) {
 	for i := 10; i >= 0; i-- {
 		_, preimage := createHTLC(i, lnwire.MilliSatoshi(1e7))
 
-		err := bobChannel.SettleHTLC(preimage, uint64(i))
+		err := bobChannel.SettleHTLC(preimage, uint64(i), nil, nil, nil)
 		if err != nil {
 			t.Fatalf("bob unable to settle inbound htlc: %v", err)
 		}
@@ -761,7 +472,7 @@ func TestCooperativeChannelClosure(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -828,7 +539,7 @@ func TestForceClose(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(3)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -841,7 +552,7 @@ func TestForceClose(t *testing.T) {
 	// We'll ensure that the HTLC amount is above Alice's dust limit.
 	htlcAmount := lnwire.NewMSatFromSatoshis(20000)
 	htlcAlice, _ := createHTLC(0, htlcAmount)
-	if _, err := aliceChannel.AddHTLC(htlcAlice); err != nil {
+	if _, err := aliceChannel.AddHTLC(htlcAlice, nil); err != nil {
 		t.Fatalf("alice unable to add htlc: %v", err)
 	}
 	if _, err := bobChannel.ReceiveHTLC(htlcAlice); err != nil {
@@ -852,7 +563,7 @@ func TestForceClose(t *testing.T) {
 	// have both an incoming and outgoing HTLC on her commitment
 	// transaction.
 	htlcBob, preimageBob := createHTLC(0, htlcAmount)
-	if _, err := bobChannel.AddHTLC(htlcBob); err != nil {
+	if _, err := bobChannel.AddHTLC(htlcBob, nil); err != nil {
 		t.Fatalf("alice unable to add htlc: %v", err)
 	}
 	if _, err := aliceChannel.ReceiveHTLC(htlcBob); err != nil {
@@ -967,7 +678,7 @@ func TestForceClose(t *testing.T) {
 		Value:    htlcResolution.SweepSignDesc.Output.Value,
 	})
 	htlcResolution.SweepSignDesc.InputIndex = 0
-	sweepTx.TxIn[0].Witness, err = htlcSpendSuccess(aliceChannel.signer,
+	sweepTx.TxIn[0].Witness, err = htlcSpendSuccess(aliceChannel.Signer,
 		&htlcResolution.SweepSignDesc, sweepTx,
 		uint32(aliceChannel.channelState.LocalChanCfg.CsvDelay))
 	if err != nil {
@@ -1028,7 +739,7 @@ func TestForceClose(t *testing.T) {
 		Value:    inHtlcResolution.SweepSignDesc.Output.Value,
 	})
 	inHtlcResolution.SweepSignDesc.InputIndex = 0
-	sweepTx.TxIn[0].Witness, err = htlcSpendSuccess(aliceChannel.signer,
+	sweepTx.TxIn[0].Witness, err = htlcSpendSuccess(aliceChannel.Signer,
 		&inHtlcResolution.SweepSignDesc, sweepTx,
 		uint32(aliceChannel.channelState.LocalChanCfg.CsvDelay))
 	if err != nil {
@@ -1117,7 +828,7 @@ func TestForceCloseDustOutput(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(3)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -1139,7 +850,7 @@ func TestForceCloseDustOutput(t *testing.T) {
 	// Have Bobs' to-self output be below her dust limit and check
 	// ForceCloseSummary again on both peers.
 	htlc, preimage := createHTLC(0, bobAmount-htlcAmount)
-	bobHtlcIndex, err := bobChannel.AddHTLC(htlc)
+	bobHtlcIndex, err := bobChannel.AddHTLC(htlc, nil)
 	if err != nil {
 		t.Fatalf("alice unable to add htlc: %v", err)
 	}
@@ -1152,7 +863,7 @@ func TestForceCloseDustOutput(t *testing.T) {
 	}
 
 	// Settle HTLC and sign new commitment.
-	err = aliceChannel.SettleHTLC(preimage, aliceHtlcIndex)
+	err = aliceChannel.SettleHTLC(preimage, aliceHtlcIndex, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("bob unable to settle inbound htlc: %v", err)
 	}
@@ -1235,7 +946,7 @@ func TestDustHTLCFees(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(3)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -1246,7 +957,7 @@ func TestDustHTLCFees(t *testing.T) {
 	// This HTLC amount should be lower than the dust limits of both nodes.
 	htlcAmount := lnwire.NewMSatFromSatoshis(100)
 	htlc, _ := createHTLC(0, htlcAmount)
-	if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+	if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 		t.Fatalf("alice unable to add htlc: %v", err)
 	}
 	if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
@@ -1312,7 +1023,7 @@ func TestHTLCDustLimit(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(3)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -1325,7 +1036,7 @@ func TestHTLCDustLimit(t *testing.T) {
 	htlcAmount := lnwire.NewMSatFromSatoshis(htlcSat)
 
 	htlc, preimage := createHTLC(0, htlcAmount)
-	aliceHtlcIndex, err := aliceChannel.AddHTLC(htlc)
+	aliceHtlcIndex, err := aliceChannel.AddHTLC(htlc, nil)
 	if err != nil {
 		t.Fatalf("alice unable to add htlc: %v", err)
 	}
@@ -1359,7 +1070,7 @@ func TestHTLCDustLimit(t *testing.T) {
 	}
 
 	// Settle HTLC and create a new commitment state.
-	err = bobChannel.SettleHTLC(preimage, bobHtlcIndex)
+	err = bobChannel.SettleHTLC(preimage, bobHtlcIndex, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("bob unable to settle inbound htlc: %v", err)
 	}
@@ -1384,6 +1095,177 @@ func TestHTLCDustLimit(t *testing.T) {
 	}
 }
 
+// TestHTLCSigNumber tests that a received commitment is only accepted if it
+// comes with the exact number of valid HTLC signatures.
+func TestHTLCSigNumber(t *testing.T) {
+	t.Parallel()
+
+	// createChanWithHTLC is a helper method that sets ut two channels, and
+	// adds HTLCs with the passed values to the channels.
+	createChanWithHTLC := func(htlcValues ...btcutil.Amount) (
+		*LightningChannel, *LightningChannel, func()) {
+
+		// Create a test channel funded evenly with Alice having 5 BTC,
+		// and Bob having 5 BTC. Alice's dustlimit is 200 sat, while
+		// Bob has 1300 sat.
+		aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
+		if err != nil {
+			t.Fatalf("unable to create test channels: %v", err)
+		}
+
+		for i, htlcSat := range htlcValues {
+			htlcMsat := lnwire.NewMSatFromSatoshis(htlcSat)
+			htlc, _ := createHTLC(i, htlcMsat)
+			_, err := aliceChannel.AddHTLC(htlc, nil)
+			if err != nil {
+				t.Fatalf("alice unable to add htlc: %v", err)
+			}
+			_, err = bobChannel.ReceiveHTLC(htlc)
+			if err != nil {
+				t.Fatalf("bob unable to receive htlc: %v", err)
+			}
+		}
+
+		return aliceChannel, bobChannel, cleanUp
+	}
+
+	// Calculate two values that will be below and above Bob's dust limit.
+	estimator := &StaticFeeEstimator{24}
+	feePerVSize, err := estimator.EstimateFeePerVSize(1)
+	if err != nil {
+		t.Fatalf("unable to get fee: %v", err)
+	}
+	feePerKw := feePerVSize.FeePerKWeight()
+
+	belowDust := btcutil.Amount(500) + htlcTimeoutFee(feePerKw)
+	aboveDust := btcutil.Amount(1400) + htlcSuccessFee(feePerKw)
+
+	// ===================================================================
+	// Test that Bob will reject a commitment if Alice doesn't send enough
+	// HTLC signatures.
+	// ===================================================================
+	aliceChannel, bobChannel, cleanUp := createChanWithHTLC(aboveDust,
+		aboveDust)
+	defer cleanUp()
+
+	aliceSig, aliceHtlcSigs, err := aliceChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("Error signing next commitment: %v", err)
+	}
+
+	if len(aliceHtlcSigs) != 2 {
+		t.Fatalf("expected 2 htlc sig, instead got %v",
+			len(aliceHtlcSigs))
+	}
+
+	// Now discard one signature from the htlcSig slice. Bob should reject
+	// the commitment because of this.
+	err = bobChannel.ReceiveNewCommitment(aliceSig, aliceHtlcSigs[1:])
+	if err == nil {
+		t.Fatalf("Expected Bob to reject signatures")
+	}
+
+	// ===================================================================
+	// Test that Bob will reject a commitment if Alice doesn't send any
+	// HTLC signatures.
+	// ===================================================================
+	aliceChannel, bobChannel, cleanUp = createChanWithHTLC(aboveDust)
+	defer cleanUp()
+
+	aliceSig, aliceHtlcSigs, err = aliceChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("Error signing next commitment: %v", err)
+	}
+
+	if len(aliceHtlcSigs) != 1 {
+		t.Fatalf("expected 1 htlc sig, instead got %v",
+			len(aliceHtlcSigs))
+	}
+
+	// Now just give Bob an empty htlcSig slice. He should reject the
+	// commitment because of this.
+	err = bobChannel.ReceiveNewCommitment(aliceSig, []lnwire.Sig{})
+	if err == nil {
+		t.Fatalf("Expected Bob to reject signatures")
+	}
+
+	// ==============================================================
+	// Test that sigs are not returned for HTLCs below dust limit.
+	// ==============================================================
+	aliceChannel, bobChannel, cleanUp = createChanWithHTLC(belowDust)
+	defer cleanUp()
+
+	aliceSig, aliceHtlcSigs, err = aliceChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("Error signing next commitment: %v", err)
+	}
+
+	// Since the HTLC is below Bob's dust limit, Alice won't need to send
+	// any signatures for this HTLC.
+	if len(aliceHtlcSigs) != 0 {
+		t.Fatalf("expected no htlc sigs, instead got %v",
+			len(aliceHtlcSigs))
+	}
+
+	err = bobChannel.ReceiveNewCommitment(aliceSig, aliceHtlcSigs)
+	if err != nil {
+		t.Fatalf("Bob failed receiving commitment: %v", err)
+	}
+
+	// ================================================================
+	// Test that sigs are correctly returned for HTLCs above dust limit.
+	// ================================================================
+	aliceChannel, bobChannel, cleanUp = createChanWithHTLC(aboveDust)
+	defer cleanUp()
+
+	aliceSig, aliceHtlcSigs, err = aliceChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("Error signing next commitment: %v", err)
+	}
+
+	// Since the HTLC is above Bob's dust limit, Alice should send a
+	// signature for this HTLC.
+	if len(aliceHtlcSigs) != 1 {
+		t.Fatalf("expected 1 htlc sig, instead got %v",
+			len(aliceHtlcSigs))
+	}
+
+	err = bobChannel.ReceiveNewCommitment(aliceSig, aliceHtlcSigs)
+	if err != nil {
+		t.Fatalf("Bob failed receiving commitment: %v", err)
+	}
+
+	// ====================================================================
+	// Test that Bob will not validate a received commitment if Alice sends
+	// signatures for HTLCs below the dust limit.
+	// ====================================================================
+	aliceChannel, bobChannel, cleanUp = createChanWithHTLC(belowDust,
+		aboveDust)
+	defer cleanUp()
+
+	// Alice should produce only one signature, since one HTLC is below
+	// dust.
+	aliceSig, aliceHtlcSigs, err = aliceChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("Error signing next commitment: %v", err)
+	}
+
+	if len(aliceHtlcSigs) != 1 {
+		t.Fatalf("expected 1 htlc sig, instead got %v",
+			len(aliceHtlcSigs))
+	}
+
+	// Add an extra signature.
+	aliceHtlcSigs = append(aliceHtlcSigs, aliceHtlcSigs[0])
+
+	// Bob should reject these signatures since they don't match the number
+	// of HTLCs above dust.
+	err = bobChannel.ReceiveNewCommitment(aliceSig, aliceHtlcSigs)
+	if err == nil {
+		t.Fatalf("Expected Bob to reject signatures")
+	}
+}
+
 // TestChannelBalanceDustLimit tests the condition when the remaining balance
 // for one of the channel participants is so small as to be considered dust. In
 // this case, the output for that participant is removed and all funds (minus
@@ -1397,7 +1279,7 @@ func TestChannelBalanceDustLimit(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(3)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -1421,7 +1303,7 @@ func TestChannelBalanceDustLimit(t *testing.T) {
 	htlcAmount := lnwire.NewMSatFromSatoshis(htlcSat)
 
 	htlc, preimage := createHTLC(0, htlcAmount)
-	aliceHtlcIndex, err := aliceChannel.AddHTLC(htlc)
+	aliceHtlcIndex, err := aliceChannel.AddHTLC(htlc, nil)
 	if err != nil {
 		t.Fatalf("alice unable to add htlc: %v", err)
 	}
@@ -1432,7 +1314,7 @@ func TestChannelBalanceDustLimit(t *testing.T) {
 	if err := forceStateTransition(aliceChannel, bobChannel); err != nil {
 		t.Fatalf("state transition error: %v", err)
 	}
-	err = bobChannel.SettleHTLC(preimage, bobHtlcIndex)
+	err = bobChannel.SettleHTLC(preimage, bobHtlcIndex, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("bob unable to settle inbound htlc: %v", err)
 	}
@@ -1465,7 +1347,7 @@ func TestStateUpdatePersistence(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -1492,7 +1374,7 @@ func TestStateUpdatePersistence(t *testing.T) {
 			OnionBlob:   fakeOnionBlob,
 		}
 
-		if _, err := aliceChannel.AddHTLC(h); err != nil {
+		if _, err := aliceChannel.AddHTLC(h, nil); err != nil {
 			t.Fatalf("unable to add alice's htlc: %v", err)
 		}
 		if _, err := bobChannel.ReceiveHTLC(h); err != nil {
@@ -1506,7 +1388,7 @@ func TestStateUpdatePersistence(t *testing.T) {
 		Expiry:      uint32(10),
 		OnionBlob:   fakeOnionBlob,
 	}
-	if _, err := bobChannel.AddHTLC(bobh); err != nil {
+	if _, err := bobChannel.AddHTLC(bobh, nil); err != nil {
 		t.Fatalf("unable to add bob's htlc: %v", err)
 	}
 	if _, err := aliceChannel.ReceiveHTLC(bobh); err != nil {
@@ -1563,13 +1445,13 @@ func TestStateUpdatePersistence(t *testing.T) {
 		t.Fatalf("unable to fetch channel: %v", err)
 	}
 	aliceChannelNew, err := NewLightningChannel(
-		aliceChannel.signer, nil, aliceChannels[0],
+		aliceChannel.Signer, nil, aliceChannels[0],
 	)
 	if err != nil {
 		t.Fatalf("unable to create new channel: %v", err)
 	}
 	bobChannelNew, err := NewLightningChannel(
-		bobChannel.signer, nil, bobChannels[0],
+		bobChannel.Signer, nil, bobChannels[0],
 	)
 	if err != nil {
 		t.Fatalf("unable to create new channel: %v", err)
@@ -1682,7 +1564,7 @@ func TestStateUpdatePersistence(t *testing.T) {
 	// Now settle all the HTLCs, then force a state update. The state
 	// update should succeed as both sides have identical.
 	for i := 0; i < 3; i++ {
-		err := bobChannelNew.SettleHTLC(alicePreimage, uint64(i))
+		err := bobChannelNew.SettleHTLC(alicePreimage, uint64(i), nil, nil, nil)
 		if err != nil {
 			t.Fatalf("unable to settle htlc #%v: %v", i, err)
 		}
@@ -1691,7 +1573,7 @@ func TestStateUpdatePersistence(t *testing.T) {
 			t.Fatalf("unable to settle htlc#%v: %v", i, err)
 		}
 	}
-	err = aliceChannelNew.SettleHTLC(bobPreimage, 0)
+	err = aliceChannelNew.SettleHTLC(bobPreimage, 0, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unable to settle htlc: %v", err)
 	}
@@ -1734,14 +1616,14 @@ func TestStateUpdatePersistence(t *testing.T) {
 	// has been persisted properly. If we instruct Alice to add a new HTLC,
 	// it should have an index of 3. If we instruct Bob to do the
 	// same, it should have an index of 1.
-	aliceHtlcIndex, err := aliceChannel.AddHTLC(bobh)
+	aliceHtlcIndex, err := aliceChannel.AddHTLC(bobh, nil)
 	if err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
 	if aliceHtlcIndex != 3 {
 		t.Fatalf("wrong htlc index: expected %v, got %v", 3, aliceHtlcIndex)
 	}
-	bobHtlcIndex, err := bobChannel.AddHTLC(bobh)
+	bobHtlcIndex, err := bobChannel.AddHTLC(bobh, nil)
 	if err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
@@ -1756,7 +1638,7 @@ func TestCancelHTLC(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(5)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -1774,7 +1656,7 @@ func TestCancelHTLC(t *testing.T) {
 		Expiry:      10,
 	}
 
-	aliceHtlcIndex, err := aliceChannel.AddHTLC(htlc)
+	aliceHtlcIndex, err := aliceChannel.AddHTLC(htlc, nil)
 	if err != nil {
 		t.Fatalf("unable to add alice htlc: %v", err)
 	}
@@ -1799,7 +1681,7 @@ func TestCancelHTLC(t *testing.T) {
 
 	// Now, with the HTLC committed on both sides, trigger a cancellation
 	// from Bob to Alice, removing the HTLC.
-	err = bobChannel.FailHTLC(bobHtlcIndex, []byte("failreason"))
+	err = bobChannel.FailHTLC(bobHtlcIndex, []byte("failreason"), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unable to cancel HTLC: %v", err)
 	}
@@ -1870,7 +1752,7 @@ func TestCooperativeCloseDustAdherence(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(5)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -2026,12 +1908,67 @@ func TestCooperativeCloseDustAdherence(t *testing.T) {
 	}
 }
 
+// TestUpdateFeeAdjustments tests that the state machine is able to properly
+// accept valid fee changes, as well as reject any invalid fee updates.
+func TestUpdateFeeAdjustments(t *testing.T) {
+	t.Parallel()
+
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
+	if err != nil {
+		t.Fatalf("unable to create test channels: %v", err)
+	}
+	defer cleanUp()
+
+	// First, we'll grab the current base fee rate as we'll be using this
+	// to make relative adjustments int he fee rate.
+	baseFeeRate := aliceChannel.channelState.LocalCommitment.FeePerKw
+
+	// We'll first try to increase the fee rate 5x, this should be able to
+	// be committed without any issue.
+	newFee := SatPerKWeight(baseFeeRate * 5)
+
+	if err := aliceChannel.UpdateFee(newFee); err != nil {
+		t.Fatalf("unable to alice update fee: %v", err)
+	}
+	if err := bobChannel.ReceiveUpdateFee(newFee); err != nil {
+		t.Fatalf("unable to bob update fee: %v", err)
+	}
+
+	// With the fee updates applied, we'll now initiate a state transition
+	// to ensure the fee update is locked in.
+	if err := forceStateTransition(aliceChannel, bobChannel); err != nil {
+		t.Fatalf("unable to create new commitment: %v", err)
+	}
+
+	// We'll now attempt to increase the fee rate 1,000,000x of the base
+	// fee.  This should result in an error as Alice won't be able to pay
+	// this new fee rate.
+	newFee = SatPerKWeight(baseFeeRate * 1000000)
+	if err := aliceChannel.UpdateFee(newFee); err == nil {
+		t.Fatalf("alice should reject the fee rate")
+	}
+
+	// Finally, we'll attempt to adjust the fee down and use a fee which is
+	// smaller than the initial base fee rate. The fee application and
+	// state transition should proceed without issue.
+	newFee = SatPerKWeight(baseFeeRate / 100)
+	if err := aliceChannel.UpdateFee(newFee); err != nil {
+		t.Fatalf("unable to alice update fee: %v", err)
+	}
+	if err := bobChannel.ReceiveUpdateFee(newFee); err != nil {
+		t.Fatalf("unable to bob update fee: %v", err)
+	}
+	if err := forceStateTransition(aliceChannel, bobChannel); err != nil {
+		t.Fatalf("unable to create new commitment: %v", err)
+	}
+}
+
 // TestUpdateFeeFail tests that the signature verification will fail if they
 // fee updates are out of sync.
 func TestUpdateFeeFail(t *testing.T) {
 	t.Parallel()
 
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -2067,7 +2004,7 @@ func TestUpdateFeeSenderCommits(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -2084,7 +2021,7 @@ func TestUpdateFeeSenderCommits(t *testing.T) {
 	// First Alice adds the outgoing HTLC to her local channel's state
 	// update log. Then Alice sends this wire message over to Bob who
 	// adds this htlc to his remote state update log.
-	if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+	if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
 	if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
@@ -2137,7 +2074,7 @@ func TestUpdateFeeSenderCommits(t *testing.T) {
 	// Alice receives the revocation of the old one, and can now assume
 	// that Bob's received everything up to the signature she sent,
 	// including the HTLC and fee update.
-	if _, err := aliceChannel.ReceiveRevocation(bobRevocation); err != nil {
+	if _, _, _, err := aliceChannel.ReceiveRevocation(bobRevocation); err != nil {
 		t.Fatalf("alice unable to process bob's revocation: %v", err)
 	}
 
@@ -2164,7 +2101,7 @@ func TestUpdateFeeSenderCommits(t *testing.T) {
 	}
 
 	// Bob receives revocation from Alice.
-	if _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
+	if _, _, _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
 		t.Fatalf("bob unable to process alice's revocation: %v", err)
 	}
 
@@ -2179,7 +2116,7 @@ func TestUpdateFeeReceiverCommits(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -2196,7 +2133,7 @@ func TestUpdateFeeReceiverCommits(t *testing.T) {
 	// First Alice adds the outgoing HTLC to her local channel's state
 	// update log. Then Alice sends this wire message over to Bob who
 	// adds this htlc to his remote state update log.
-	if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+	if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
 	if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
@@ -2232,7 +2169,7 @@ func TestUpdateFeeReceiverCommits(t *testing.T) {
 	}
 
 	// Bob receives the revocation of the old commitment
-	if _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
+	if _, _, _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
 		t.Fatalf("alice unable to process bob's revocation: %v", err)
 	}
 
@@ -2276,7 +2213,7 @@ func TestUpdateFeeReceiverCommits(t *testing.T) {
 
 	// Alice receives revocation from Bob, and can now be sure that Bob
 	// received the two updates, and they are considered locked in.
-	if _, err := aliceChannel.ReceiveRevocation(bobRevocation); err != nil {
+	if _, _, _, err := aliceChannel.ReceiveRevocation(bobRevocation); err != nil {
 		t.Fatalf("bob unable to process alice's revocation: %v", err)
 	}
 
@@ -2303,7 +2240,7 @@ func TestUpdateFeeReceiverCommits(t *testing.T) {
 	}
 
 	// Bob receives revocation from Alice.
-	if _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
+	if _, _, _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
 		t.Fatalf("bob unable to process alice's revocation: %v", err)
 	}
 }
@@ -2317,7 +2254,7 @@ func TestUpdateFeeReceiverSendsUpdate(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -2346,7 +2283,7 @@ func TestUpdateFeeMultipleUpdates(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -2417,7 +2354,7 @@ func TestUpdateFeeMultipleUpdates(t *testing.T) {
 	// Alice receives the revocation of the old one, and can now assume that
 	// Bob's received everything up to the signature she sent, including the
 	// HTLC and fee update.
-	if _, err := aliceChannel.ReceiveRevocation(bobRevocation); err != nil {
+	if _, _, _, err := aliceChannel.ReceiveRevocation(bobRevocation); err != nil {
 		t.Fatalf("alice unable to process bob's revocation: %v", err)
 	}
 
@@ -2443,7 +2380,7 @@ func TestUpdateFeeMultipleUpdates(t *testing.T) {
 	}
 
 	// Bob receives revocation from Alice.
-	if _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
+	if _, _, _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
 		t.Fatalf("bob unable to process alice's revocation: %v", err)
 	}
 }
@@ -2456,7 +2393,7 @@ func TestAddHTLCNegativeBalance(t *testing.T) {
 
 	// We'll kick off the test by creating our channels which both are
 	// loaded with 5 BTC each.
-	aliceChannel, _, cleanUp, err := createTestChannels(1)
+	aliceChannel, _, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -2471,7 +2408,7 @@ func TestAddHTLCNegativeBalance(t *testing.T) {
 	htlcAmt := lnwire.NewMSatFromSatoshis(btcutil.SatoshiPerBitcoin)
 	for i := 0; i < numHTLCs; i++ {
 		htlc, _ := createHTLC(i, htlcAmt)
-		if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+		if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 			t.Fatalf("unable to add htlc: %v", err)
 		}
 	}
@@ -2481,7 +2418,7 @@ func TestAddHTLCNegativeBalance(t *testing.T) {
 	// has to pay a commitment fee).
 	htlcAmt = lnwire.NewMSatFromSatoshis(2 * btcutil.SatoshiPerBitcoin)
 	htlc, _ := createHTLC(numHTLCs+1, htlcAmt)
-	_, err = aliceChannel.AddHTLC(htlc)
+	_, err = aliceChannel.AddHTLC(htlc, nil)
 	if err != ErrBelowChanReserve {
 		t.Fatalf("expected balance below channel reserve, instead "+
 			"got: %v", err)
@@ -2501,7 +2438,7 @@ func assertNoChanSyncNeeded(t *testing.T, aliceChannel *LightningChannel,
 		t.Fatalf("line #%v: unable to produce chan sync msg: %v",
 			line, err)
 	}
-	bobMsgsToSend, err := bobChannel.ProcessChanSyncMsg(aliceChanSyncMsg)
+	bobMsgsToSend, _, _, err := bobChannel.ProcessChanSyncMsg(aliceChanSyncMsg)
 	if err != nil {
 		t.Fatalf("line #%v: unable to process ChannelReestablish "+
 			"msg: %v", line, err)
@@ -2516,7 +2453,7 @@ func assertNoChanSyncNeeded(t *testing.T, aliceChannel *LightningChannel,
 		t.Fatalf("line #%v: unable to produce chan sync msg: %v",
 			line, err)
 	}
-	aliceMsgsToSend, err := aliceChannel.ProcessChanSyncMsg(bobChanSyncMsg)
+	aliceMsgsToSend, _, _, err := aliceChannel.ProcessChanSyncMsg(bobChanSyncMsg)
 	if err != nil {
 		t.Fatalf("line #%v: unable to process ChannelReestablish "+
 			"msg: %v", line, err)
@@ -2537,7 +2474,7 @@ func TestChanSyncFullySynced(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -2557,7 +2494,7 @@ func TestChanSyncFullySynced(t *testing.T) {
 		Amount:      htlcAmt,
 		Expiry:      uint32(5),
 	}
-	aliceHtlcIndex, err := aliceChannel.AddHTLC(htlc)
+	aliceHtlcIndex, err := aliceChannel.AddHTLC(htlc, nil)
 	if err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
@@ -2577,7 +2514,7 @@ func TestChanSyncFullySynced(t *testing.T) {
 
 	// If bob settles the HTLC, and then initiates a state transition, they
 	// should both still think that they're in sync.
-	err = bobChannel.SettleHTLC(paymentPreimage, bobHtlcIndex)
+	err = bobChannel.SettleHTLC(paymentPreimage, bobHtlcIndex, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unable to settle htlc: %v", err)
 	}
@@ -2608,14 +2545,14 @@ func TestChanSyncFullySynced(t *testing.T) {
 		t.Fatalf("unable to fetch channel: %v", err)
 	}
 	aliceChannelNew, err := NewLightningChannel(
-		aliceChannel.signer, nil, aliceChannels[0],
+		aliceChannel.Signer, nil, aliceChannels[0],
 	)
 	if err != nil {
 		t.Fatalf("unable to create new channel: %v", err)
 	}
 	defer aliceChannelNew.Stop()
 	bobChannelNew, err := NewLightningChannel(
-		bobChannel.signer, nil, bobChannels[0],
+		bobChannel.Signer, nil, bobChannels[0],
 	)
 	if err != nil {
 		t.Fatalf("unable to create new channel: %v", err)
@@ -2638,7 +2575,7 @@ func restartChannel(channelOld *LightningChannel) (*LightningChannel, error) {
 	}
 
 	channelNew, err := NewLightningChannel(
-		channelOld.signer, channelOld.pCache, nodeChannels[0],
+		channelOld.Signer, channelOld.pCache, nodeChannels[0],
 	)
 	if err != nil {
 		return nil, err
@@ -2657,7 +2594,7 @@ func TestChanSyncOweCommitment(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -2681,7 +2618,7 @@ func TestChanSyncOweCommitment(t *testing.T) {
 			OnionBlob:   fakeOnionBlob,
 		}
 
-		htlcIndex, err := bobChannel.AddHTLC(h)
+		htlcIndex, err := bobChannel.AddHTLC(h, nil)
 		if err != nil {
 			t.Fatalf("unable to add bob's htlc: %v", err)
 		}
@@ -2705,7 +2642,7 @@ func TestChanSyncOweCommitment(t *testing.T) {
 	// Next, Alice's settles all 3 HTLC's from Bob, and also adds a new
 	// HTLC of her own.
 	for i := 0; i < 3; i++ {
-		err := aliceChannel.SettleHTLC(bobPreimage, uint64(i))
+		err := aliceChannel.SettleHTLC(bobPreimage, uint64(i), nil, nil, nil)
 		if err != nil {
 			t.Fatalf("unable to settle htlc: %v", err)
 		}
@@ -2724,7 +2661,7 @@ func TestChanSyncOweCommitment(t *testing.T) {
 		Expiry:      uint32(10),
 		OnionBlob:   fakeOnionBlob,
 	}
-	aliceHtlcIndex, err := aliceChannel.AddHTLC(aliceHtlc)
+	aliceHtlcIndex, err := aliceChannel.AddHTLC(aliceHtlc, nil)
 	if err != nil {
 		t.Fatalf("unable to add alice's htlc: %v", err)
 	}
@@ -2757,7 +2694,7 @@ func TestChanSyncOweCommitment(t *testing.T) {
 	// needs to retransmit the exact commitment that we failed to send
 	// above.
 	assertAliceCommitRetransmit := func() {
-		aliceMsgsToSend, err := aliceChannel.ProcessChanSyncMsg(
+		aliceMsgsToSend, _, _, err := aliceChannel.ProcessChanSyncMsg(
 			bobSyncMsg,
 		)
 		if err != nil {
@@ -2774,7 +2711,7 @@ func TestChanSyncOweCommitment(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			settleMsg, ok := aliceMsgsToSend[i].(*lnwire.UpdateFulfillHTLC)
 			if !ok {
-				t.Fatalf("expected a htlc settle message, "+
+				t.Fatalf("expected an HTLC settle message, "+
 					"instead have %v", spew.Sdump(settleMsg))
 			}
 			if settleMsg.ID != uint64(i) {
@@ -2793,7 +2730,7 @@ func TestChanSyncOweCommitment(t *testing.T) {
 
 		// The HTLC add message should be identical.
 		if _, ok := aliceMsgsToSend[3].(*lnwire.UpdateAddHTLC); !ok {
-			t.Fatalf("expected a htlc add message, instead have %v",
+			t.Fatalf("expected an HTLC add message, instead have %v",
 				spew.Sdump(aliceMsgsToSend[3]))
 		}
 		if !reflect.DeepEqual(aliceHtlc, aliceMsgsToSend[3]) {
@@ -2833,7 +2770,7 @@ func TestChanSyncOweCommitment(t *testing.T) {
 
 	// From Bob's Pov he has nothing else to send, so he should conclude he
 	// has no further action remaining.
-	bobMsgsToSend, err := bobChannel.ProcessChanSyncMsg(aliceSyncMsg)
+	bobMsgsToSend, _, _, err := bobChannel.ProcessChanSyncMsg(aliceSyncMsg)
 	if err != nil {
 		t.Fatalf("unable to process chan sync msg: %v", err)
 	}
@@ -2869,7 +2806,7 @@ func TestChanSyncOweCommitment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bob unable to sign commitment: %v", err)
 	}
-	_, err = aliceChannel.ReceiveRevocation(bobRevocation)
+	_, _, _, err = aliceChannel.ReceiveRevocation(bobRevocation)
 	if err != nil {
 		t.Fatalf("alice unable to recv revocation: %v", err)
 	}
@@ -2881,7 +2818,7 @@ func TestChanSyncOweCommitment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("alice unable to revoke commitment: %v", err)
 	}
-	if _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
+	if _, _, _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
 		t.Fatalf("bob unable to recv revocation: %v", err)
 	}
 
@@ -2928,7 +2865,7 @@ func TestChanSyncOweCommitment(t *testing.T) {
 
 	// We'll conclude the test by having Bob settle Alice's HTLC, then
 	// initiate a state transition.
-	err = bobChannel.SettleHTLC(alicePreimage, bobHtlcIndex)
+	err = bobChannel.SettleHTLC(alicePreimage, bobHtlcIndex, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unable to settle htlc: %v", err)
 	}
@@ -2971,7 +2908,7 @@ func TestChanSyncOweRevocation(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -2993,7 +2930,7 @@ func TestChanSyncOweRevocation(t *testing.T) {
 		Amount:      htlcAmt,
 		Expiry:      uint32(10),
 	}
-	bobHtlcIndex, err := bobChannel.AddHTLC(bobHtlc)
+	bobHtlcIndex, err := bobChannel.AddHTLC(bobHtlc, nil)
 	if err != nil {
 		t.Fatalf("unable to add bob's htlc: %v", err)
 	}
@@ -3007,7 +2944,7 @@ func TestChanSyncOweRevocation(t *testing.T) {
 
 	// Next, Alice will settle that single HTLC, the _begin_ the start of a
 	// state transition.
-	err = aliceChannel.SettleHTLC(bobPreimage, aliceHtlcIndex)
+	err = aliceChannel.SettleHTLC(bobPreimage, aliceHtlcIndex, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unable to settle htlc: %v", err)
 	}
@@ -3039,7 +2976,7 @@ func TestChanSyncOweRevocation(t *testing.T) {
 		t.Fatalf("bob unable to sign commitment: %v", err)
 	}
 
-	_, err = aliceChannel.ReceiveRevocation(bobRevocation)
+	_, _, _, err = aliceChannel.ReceiveRevocation(bobRevocation)
 	if err != nil {
 		t.Fatalf("alice unable to recv revocation: %v", err)
 	}
@@ -3068,7 +3005,7 @@ func TestChanSyncOweRevocation(t *testing.T) {
 	}
 
 	assertAliceOwesRevoke := func() {
-		aliceMsgsToSend, err := aliceChannel.ProcessChanSyncMsg(bobSyncMsg)
+		aliceMsgsToSend, _, _, err := aliceChannel.ProcessChanSyncMsg(bobSyncMsg)
 		if err != nil {
 			t.Fatalf("unable to process chan sync msg: %v", err)
 		}
@@ -3097,7 +3034,7 @@ func TestChanSyncOweRevocation(t *testing.T) {
 	}
 
 	// From Bob's PoV he shouldn't think that he owes Alice any messages.
-	bobMsgsToSend, err := bobChannel.ProcessChanSyncMsg(aliceSyncMsg)
+	bobMsgsToSend, _, _, err := bobChannel.ProcessChanSyncMsg(aliceSyncMsg)
 	if err != nil {
 		t.Fatalf("unable to process chan sync msg: %v", err)
 	}
@@ -3122,7 +3059,7 @@ func TestChanSyncOweRevocation(t *testing.T) {
 	// TODO(roasbeef): restart bob too???
 
 	// We'll continue by then allowing bob to process Alice's revocation message.
-	if _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
+	if _, _, _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
 		t.Fatalf("bob unable to recv revocation: %v", err)
 	}
 
@@ -3137,7 +3074,7 @@ func TestChanSyncOweRevocation(t *testing.T) {
 		Amount:      htlcAmt,
 		Expiry:      uint32(10),
 	}
-	if _, err := aliceChannel.AddHTLC(aliceHtlc); err != nil {
+	if _, err := aliceChannel.AddHTLC(aliceHtlc, nil); err != nil {
 		t.Fatalf("unable to add alice's htlc: %v", err)
 	}
 	if _, err := bobChannel.ReceiveHTLC(aliceHtlc); err != nil {
@@ -3161,7 +3098,7 @@ func TestChanSyncOweRevocationAndCommit(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -3179,7 +3116,7 @@ func TestChanSyncOweRevocationAndCommit(t *testing.T) {
 		Amount:      htlcAmt,
 		Expiry:      uint32(10),
 	}
-	bobHtlcIndex, err := bobChannel.AddHTLC(bobHtlc)
+	bobHtlcIndex, err := bobChannel.AddHTLC(bobHtlc, nil)
 	if err != nil {
 		t.Fatalf("unable to add bob's htlc: %v", err)
 	}
@@ -3193,7 +3130,7 @@ func TestChanSyncOweRevocationAndCommit(t *testing.T) {
 
 	// Next, Alice will settle that incoming HTLC, then we'll start the
 	// core of the test itself.
-	err = aliceChannel.SettleHTLC(bobPreimage, aliceHtlcIndex)
+	err = aliceChannel.SettleHTLC(bobPreimage, aliceHtlcIndex, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unable to settle htlc: %v", err)
 	}
@@ -3236,7 +3173,7 @@ func TestChanSyncOweRevocationAndCommit(t *testing.T) {
 		t.Fatalf("unable to produce chan sync msg: %v", err)
 	}
 
-	aliceMsgsToSend, err := aliceChannel.ProcessChanSyncMsg(bobSyncMsg)
+	aliceMsgsToSend, _, _, err := aliceChannel.ProcessChanSyncMsg(bobSyncMsg)
 	if err != nil {
 		t.Fatalf("unable to process chan sync msg: %v", err)
 	}
@@ -3246,7 +3183,7 @@ func TestChanSyncOweRevocationAndCommit(t *testing.T) {
 	}
 
 	assertBobSendsRevokeAndCommit := func() {
-		bobMsgsToSend, err := bobChannel.ProcessChanSyncMsg(aliceSyncMsg)
+		bobMsgsToSend, _, _, err := bobChannel.ProcessChanSyncMsg(aliceSyncMsg)
 		if err != nil {
 			t.Fatalf("unable to process chan sync msg: %v", err)
 		}
@@ -3301,7 +3238,7 @@ func TestChanSyncOweRevocationAndCommit(t *testing.T) {
 
 	// We'll now finish the state transition by having Alice process both
 	// messages, and send her final revocation.
-	_, err = aliceChannel.ReceiveRevocation(bobRevocation)
+	_, _, _, err = aliceChannel.ReceiveRevocation(bobRevocation)
 	if err != nil {
 		t.Fatalf("alice unable to recv revocation: %v", err)
 	}
@@ -3313,7 +3250,7 @@ func TestChanSyncOweRevocationAndCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("alice unable to revoke commitment: %v", err)
 	}
-	if _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
+	if _, _, _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
 		t.Fatalf("bob unable to recv revocation: %v", err)
 	}
 }
@@ -3330,7 +3267,7 @@ func TestChanSyncOweRevocationAndCommitForceTransition(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -3348,7 +3285,7 @@ func TestChanSyncOweRevocationAndCommitForceTransition(t *testing.T) {
 		Amount:      htlcAmt,
 		Expiry:      uint32(10),
 	}
-	bobHtlcIndex, err := bobChannel.AddHTLC(bobHtlc)
+	bobHtlcIndex, err := bobChannel.AddHTLC(bobHtlc, nil)
 	if err != nil {
 		t.Fatalf("unable to add bob's htlc: %v", err)
 	}
@@ -3362,7 +3299,7 @@ func TestChanSyncOweRevocationAndCommitForceTransition(t *testing.T) {
 
 	// Next, Alice will settle that incoming HTLC, then we'll start the
 	// core of the test itself.
-	err = aliceChannel.SettleHTLC(bobPreimage, aliceHtlcIndex)
+	err = aliceChannel.SettleHTLC(bobPreimage, aliceHtlcIndex, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unable to settle htlc: %v", err)
 	}
@@ -3402,7 +3339,7 @@ func TestChanSyncOweRevocationAndCommitForceTransition(t *testing.T) {
 		t.Fatalf("unable to produce chan sync msg: %v", err)
 	}
 
-	aliceMsgsToSend, err := aliceChannel.ProcessChanSyncMsg(bobSyncMsg)
+	aliceMsgsToSend, _, _, err := aliceChannel.ProcessChanSyncMsg(bobSyncMsg)
 	if err != nil {
 		t.Fatalf("unable to process chan sync msg: %v", err)
 	}
@@ -3415,7 +3352,7 @@ func TestChanSyncOweRevocationAndCommitForceTransition(t *testing.T) {
 	// send his RevokeAndAck message again. Additionally, the CommitSig
 	// message that he sends should be sufficient to finalize the state
 	// transition.
-	bobMsgsToSend, err := bobChannel.ProcessChanSyncMsg(aliceSyncMsg)
+	bobMsgsToSend, _, _, err := bobChannel.ProcessChanSyncMsg(aliceSyncMsg)
 	if err != nil {
 		t.Fatalf("unable to process chan sync msg: %v", err)
 	}
@@ -3486,7 +3423,7 @@ func TestChanSyncOweRevocationAndCommitForceTransition(t *testing.T) {
 	// Now, we'll continue the exchange, sending Bob's revocation and
 	// signature message to Alice, ending with Alice sending her revocation
 	// message to Bob.
-	_, err = aliceChannel.ReceiveRevocation(bobRevocation)
+	_, _, _, err = aliceChannel.ReceiveRevocation(bobRevocation)
 	if err != nil {
 		t.Fatalf("alice unable to recv revocation: %v", err)
 	}
@@ -3500,7 +3437,7 @@ func TestChanSyncOweRevocationAndCommitForceTransition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("alice unable to revoke commitment: %v", err)
 	}
-	if _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
+	if _, _, _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
 		t.Fatalf("bob unable to recv revocation: %v", err)
 	}
 }
@@ -3514,7 +3451,7 @@ func TestFeeUpdateRejectInsaneFee(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, _, cleanUp, err := createTestChannels(1)
+	aliceChannel, _, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -3525,7 +3462,7 @@ func TestFeeUpdateRejectInsaneFee(t *testing.T) {
 	startingFeeRate := SatPerKWeight(aliceChannel.channelState.LocalCommitment.FeePerKw)
 	newFeeRate := startingFeeRate * 1000000
 
-	// Both Alice and Bob should reject this new fee rate as it it far too
+	// Both Alice and Bob should reject this new fee rate as it is far too
 	// large.
 	if err := aliceChannel.UpdateFee(newFeeRate); err == nil {
 		t.Fatalf("alice should have rejected fee update")
@@ -3540,7 +3477,7 @@ func TestChannelRetransmissionFeeUpdate(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -3592,7 +3529,7 @@ func TestChannelRetransmissionFeeUpdate(t *testing.T) {
 	}
 
 	// Bob should detect that he doesn't need to send anything to Alice.
-	bobMsgsToSend, err := bobChannel.ProcessChanSyncMsg(aliceSyncMsg)
+	bobMsgsToSend, _, _, err := bobChannel.ProcessChanSyncMsg(aliceSyncMsg)
 	if err != nil {
 		t.Fatalf("unable to process chan sync msg: %v", err)
 	}
@@ -3605,7 +3542,7 @@ func TestChannelRetransmissionFeeUpdate(t *testing.T) {
 	// When Alice processes Bob's chan sync message, she should realize
 	// that she needs to first send a new UpdateFee message, and also a
 	// CommitSig.
-	aliceMsgsToSend, err := aliceChannel.ProcessChanSyncMsg(
+	aliceMsgsToSend, _, _, err := aliceChannel.ProcessChanSyncMsg(
 		bobSyncMsg,
 	)
 	if err != nil {
@@ -3671,7 +3608,7 @@ func TestChannelRetransmissionFeeUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bob unable to sign commitment: %v", err)
 	}
-	_, err = aliceChannel.ReceiveRevocation(bobRevocation)
+	_, _, _, err = aliceChannel.ReceiveRevocation(bobRevocation)
 	if err != nil {
 		t.Fatalf("alice unable to recv revocation: %v", err)
 	}
@@ -3683,7 +3620,7 @@ func TestChannelRetransmissionFeeUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("alice unable to revoke commitment: %v", err)
 	}
-	if _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
+	if _, _, _, err := bobChannel.ReceiveRevocation(aliceRevocation); err != nil {
 		t.Fatalf("bob unable to recv revocation: %v", err)
 	}
 
@@ -3705,7 +3642,7 @@ func TestChannelRetransmissionFeeUpdate(t *testing.T) {
 		Amount:      lnwire.NewMSatFromSatoshis(20000),
 		Expiry:      uint32(10),
 	}
-	if _, err := bobChannel.AddHTLC(bobHtlc); err != nil {
+	if _, err := bobChannel.AddHTLC(bobHtlc, nil); err != nil {
 		t.Fatalf("unable to add bob's htlc: %v", err)
 	}
 	if _, err := aliceChannel.ReceiveHTLC(bobHtlc); err != nil {
@@ -3725,7 +3662,7 @@ func TestChanSyncUnableToSync(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -3741,11 +3678,11 @@ func TestChanSyncUnableToSync(t *testing.T) {
 		NextLocalCommitHeight:  1000,
 		RemoteCommitTailHeight: 9000,
 	}
-	_, err = bobChannel.ProcessChanSyncMsg(badChanSync)
+	_, _, _, err = bobChannel.ProcessChanSyncMsg(badChanSync)
 	if err != ErrCannotSyncCommitChains {
 		t.Fatalf("expected error instead have: %v", err)
 	}
-	_, err = aliceChannel.ProcessChanSyncMsg(badChanSync)
+	_, _, _, err = aliceChannel.ProcessChanSyncMsg(badChanSync)
 	if err != ErrCannotSyncCommitChains {
 		t.Fatalf("expected error instead have: %v", err)
 	}
@@ -3762,7 +3699,7 @@ func TestChanSyncInvalidLastSecret(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -3788,7 +3725,7 @@ func TestChanSyncInvalidLastSecret(t *testing.T) {
 		Amount:      htlcAmt,
 		Expiry:      uint32(5),
 	}
-	if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+	if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
 	if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
@@ -3827,7 +3764,7 @@ func TestChanSyncInvalidLastSecret(t *testing.T) {
 
 	// Alice's former self should conclude that she possibly lost data as
 	// Bob is sending a valid commit secret for the latest state.
-	_, err = aliceOld.ProcessChanSyncMsg(bobChanSync)
+	_, _, _, err = aliceOld.ProcessChanSyncMsg(bobChanSync)
 	if err != ErrCommitSyncDataLoss {
 		t.Fatalf("wrong error, expected ErrCommitSyncDataLoss "+
 			"instead got: %v", err)
@@ -3835,7 +3772,7 @@ func TestChanSyncInvalidLastSecret(t *testing.T) {
 
 	// Bob should conclude that he should force close the channel, as Alice
 	// cannot continue operation.
-	_, err = bobChannel.ProcessChanSyncMsg(aliceChanSync)
+	_, _, _, err = bobChannel.ProcessChanSyncMsg(aliceChanSync)
 	if err != ErrInvalidLastCommitSecret {
 		t.Fatalf("wrong error, expected ErrInvalidLastCommitSecret, "+
 			"instead got: %v", err)
@@ -3852,7 +3789,7 @@ func TestChanAvailableBandwidth(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -3898,7 +3835,7 @@ func TestChanAvailableBandwidth(t *testing.T) {
 	alicePreimages := make([][32]byte, numHtlcs)
 	for i := 0; i < numHtlcs; i++ {
 		htlc, preImage := createHTLC(i, htlcAmt)
-		if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+		if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 			t.Fatalf("unable to add htlc: %v", err)
 		}
 		if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
@@ -3916,7 +3853,7 @@ func TestChanAvailableBandwidth(t *testing.T) {
 	htlcAmt = lnwire.NewMSatFromSatoshis(30000)
 	for i := 0; i < numHtlcs; i++ {
 		htlc, preImage := createHTLC(numHtlcs+i, htlcAmt)
-		if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+		if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 			t.Fatalf("unable to add htlc: %v", err)
 		}
 		if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
@@ -3932,7 +3869,7 @@ func TestChanAvailableBandwidth(t *testing.T) {
 	// the update log).
 	for i := 0; i < (numHtlcs*2)-1; i++ {
 		preImage := alicePreimages[i]
-		err := bobChannel.SettleHTLC(preImage, uint64(i))
+		err := bobChannel.SettleHTLC(preImage, uint64(i), nil, nil, nil)
 		if err != nil {
 			t.Fatalf("unable to settle htlc: %v", err)
 		}
@@ -3943,7 +3880,7 @@ func TestChanAvailableBandwidth(t *testing.T) {
 	}
 
 	htlcIndex := uint64((numHtlcs * 2) - 1)
-	err = bobChannel.FailHTLC(htlcIndex, []byte("f"))
+	err = bobChannel.FailHTLC(htlcIndex, []byte("f"), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unable to cancel HTLC: %v", err)
 	}
@@ -3975,7 +3912,7 @@ func TestSignCommitmentFailNotLockedIn(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, _, cleanUp, err := createTestChannels(1)
+	aliceChannel, _, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -4000,24 +3937,24 @@ func TestLockedInHtlcForwardingSkipAfterRestart(t *testing.T) {
 	t.Parallel()
 
 	// First, we'll make a channel between Alice and Bob.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
 	defer cleanUp()
 
-	// We'll now add two HTLC's from Bob to Alice, then Bob will initiate a
-	// state transition.
+	// We'll now add two HTLC's from Alice to Bob, then Alice will initiate
+	// a state transition.
 	var htlcAmt lnwire.MilliSatoshi = 100000
 	htlc, _ := createHTLC(0, htlcAmt)
-	if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+	if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
 	if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
 		t.Fatalf("unable to recv htlc: %v", err)
 	}
 	htlc2, _ := createHTLC(1, htlcAmt)
-	if _, err := aliceChannel.AddHTLC(htlc2); err != nil {
+	if _, err := aliceChannel.AddHTLC(htlc2, nil); err != nil {
 		t.Fatalf("unable to add htlc2: %v", err)
 	}
 	if _, err := bobChannel.ReceiveHTLC(htlc2); err != nil {
@@ -4038,21 +3975,26 @@ func TestLockedInHtlcForwardingSkipAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Alice should detect that she doesn't need to forward any HTLC's.
+	fwdPkg, _, _, err := aliceChannel.ReceiveRevocation(bobRevocation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fwdPkg.Adds) != 0 {
+		t.Fatalf("alice shouldn't forward any HTLC's, instead wants to "+
+			"forward %v htlcs", len(fwdPkg.Adds))
+	}
+	if len(fwdPkg.SettleFails) != 0 {
+		t.Fatalf("alice shouldn't forward any HTLC's, instead wants to "+
+			"forward %v htlcs", len(fwdPkg.SettleFails))
+	}
+
+	// Now, have Bob initiate a transition to lock in the Adds sent by
+	// Alice.
 	bobSig, bobHtlcSigs, err := bobChannel.SignNextCommitment()
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	// Alice should detect that she doesn't need to forward any HTLC's.
-	aliceHtlcsToForward, err := aliceChannel.ReceiveRevocation(
-		bobRevocation,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(aliceHtlcsToForward) != 0 {
-		t.Fatalf("alice shouldn't forward any HTLC's, instead wants to "+
-			"forward %v htlcs", len(aliceHtlcsToForward))
 	}
 
 	err = aliceChannel.ReceiveNewCommitment(bobSig, bobHtlcSigs)
@@ -4064,15 +4006,19 @@ func TestLockedInHtlcForwardingSkipAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Bob on the other hand, should detect that he now has 2 incoming
-	// HTLC's that he can forward along.
-	bobHtlcsToForward, err := bobChannel.ReceiveRevocation(aliceRevocation)
+	// Bob should now detect that he now has 2 incoming HTLC's that he can
+	// forward along.
+	fwdPkg, _, _, err = bobChannel.ReceiveRevocation(aliceRevocation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bobHtlcsToForward) != 2 {
+	if len(fwdPkg.Adds) != 2 {
 		t.Fatalf("bob should forward 2 hltcs, instead has %v",
-			len(bobHtlcsToForward))
+			len(fwdPkg.Adds))
+	}
+	if len(fwdPkg.SettleFails) != 0 {
+		t.Fatalf("bob should forward 0 hltcs, instead has %v",
+			len(fwdPkg.SettleFails))
 	}
 
 	// We'll now restart both Alice and Bob. This emulates a reconnection
@@ -4081,18 +4027,20 @@ func TestLockedInHtlcForwardingSkipAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to restart alice: %v", err)
 	}
+	defer aliceChannel.Stop()
 	bobChannel, err = restartChannel(bobChannel)
 	if err != nil {
 		t.Fatalf("unable to restart bob: %v", err)
 	}
+	defer bobChannel.Stop()
 
 	// With both nodes restarted, Bob will now attempt to cancel one of
 	// Alice's HTLC's.
-	err = bobChannel.FailHTLC(htlc2.ID, []byte("failreason"))
+	err = bobChannel.FailHTLC(htlc.ID, []byte("failreason"), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("unable to cancel HTLC: %v", err)
 	}
-	err = aliceChannel.ReceiveFailHTLC(htlc2.ID, []byte("bad"))
+	err = aliceChannel.ReceiveFailHTLC(htlc.ID, []byte("bad"))
 	if err != nil {
 		t.Fatalf("unable to recv htlc cancel: %v", err)
 	}
@@ -4111,15 +4059,11 @@ func TestLockedInHtlcForwardingSkipAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	aliceSig, aliceHtlcSigs, err = aliceChannel.SignNextCommitment()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// At this point, Bob receives the revocation from Alice, which is now
 	// his signal to examine all the HTLC's that have been locked in to
 	// process.
-	bobHtlcsToForward, err = bobChannel.ReceiveRevocation(aliceRevocation)
+	fwdPkg, _, _, err = bobChannel.ReceiveRevocation(aliceRevocation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4127,9 +4071,180 @@ func TestLockedInHtlcForwardingSkipAfterRestart(t *testing.T) {
 	// Bob should detect that he doesn't need to forward *any* HTLC's, as
 	// he was the one that initiated extending the commitment chain of
 	// Alice.
-	if len(bobHtlcsToForward) != 0 {
-		t.Fatalf("bob shouldn't forward any htlcs, but has: %v",
-			spew.Sdump(bobHtlcsToForward))
+	if len(fwdPkg.Adds) != 0 {
+		t.Fatalf("alice shouldn't forward any HTLC's, instead wants to "+
+			"forward %v htlcs", len(fwdPkg.Adds))
+	}
+	if len(fwdPkg.SettleFails) != 0 {
+		t.Fatalf("alice shouldn't forward any HTLC's, instead wants to "+
+			"forward %v htlcs", len(fwdPkg.SettleFails))
+	}
+
+	// Now, begin another state transition led by Alice, and fail the second
+	// HTLC part-way through the dance.
+	aliceSig, aliceHtlcSigs, err = aliceChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = bobChannel.ReceiveNewCommitment(aliceSig, aliceHtlcSigs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Failing the HTLC here will cause the update to be included in Alice's
+	// remote log, but it should not be committed by this transition.
+	err = bobChannel.FailHTLC(htlc2.ID, []byte("failreason"), nil, nil, nil)
+	if err != nil {
+		t.Fatalf("unable to cancel HTLC: %v", err)
+	}
+	err = aliceChannel.ReceiveFailHTLC(htlc2.ID, []byte("bad"))
+	if err != nil {
+		t.Fatalf("unable to recv htlc cancel: %v", err)
+	}
+
+	bobRevocation, _, err = bobChannel.RevokeCurrentCommitment()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Alice should detect that she doesn't need to forward any Adds's, but
+	// that the Fail has been locked in an can be forwarded.
+	_, adds, settleFails, err := aliceChannel.ReceiveRevocation(bobRevocation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(adds) != 0 {
+		t.Fatalf("alice shouldn't forward any HTLC's, instead wants to "+
+			"forward %v htlcs", len(adds))
+	}
+	if len(settleFails) != 1 {
+		t.Fatalf("alice should only forward %d HTLC's, instead wants to "+
+			"forward %v htlcs", 1, len(settleFails))
+	}
+	if settleFails[0].ParentIndex != htlc.ID {
+		t.Fatalf("alice should forward fail for htlcid=%d, instead "+
+			"forwarding id=%d", htlc.ID,
+			settleFails[0].ParentIndex)
+	}
+
+	// We'll now restart both Alice and Bob. This emulates a reconnection
+	// between the two peers.
+	aliceChannel, err = restartChannel(aliceChannel)
+	if err != nil {
+		t.Fatalf("unable to restart alice: %v", err)
+	}
+	defer aliceChannel.Stop()
+	bobChannel, err = restartChannel(bobChannel)
+	if err != nil {
+		t.Fatalf("unable to restart bob: %v", err)
+	}
+	defer bobChannel.Stop()
+
+	// Readd the Fail to both Alice and Bob's channels, as the non-committed
+	// update will not have survived the restart.
+	err = bobChannel.FailHTLC(htlc2.ID, []byte("failreason"), nil, nil, nil)
+	if err != nil {
+		t.Fatalf("unable to cancel HTLC: %v", err)
+	}
+	err = aliceChannel.ReceiveFailHTLC(htlc2.ID, []byte("bad"))
+	if err != nil {
+		t.Fatalf("unable to recv htlc cancel: %v", err)
+	}
+
+	// Have Alice initiate a state transition, which does not include the
+	// HTLCs just readded to the channel state.
+	aliceSig, aliceHtlcSigs, err = aliceChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = bobChannel.ReceiveNewCommitment(aliceSig, aliceHtlcSigs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobRevocation, _, err = bobChannel.RevokeCurrentCommitment()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Alice should detect that she doesn't need to forward any HTLC's, as
+	// the updates haven't been committed by Bob yet.
+	fwdPkg, _, _, err = aliceChannel.ReceiveRevocation(bobRevocation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fwdPkg.Adds) != 0 {
+		t.Fatalf("alice shouldn't forward any HTLC's, instead wants to "+
+			"forward %v htlcs", len(fwdPkg.Adds))
+	}
+	if len(fwdPkg.SettleFails) != 0 {
+		t.Fatalf("alice shouldn't forward any HTLC's, instead wants to "+
+			"forward %v htlcs", len(fwdPkg.SettleFails))
+	}
+
+	// Now initiate a final update from Bob to lock in the final Fail.
+	bobSig, bobHtlcSigs, err = bobChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = aliceChannel.ReceiveNewCommitment(bobSig, bobHtlcSigs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	aliceRevocation, _, err = aliceChannel.RevokeCurrentCommitment()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Bob should detect that he has nothing to forward, as he hasn't
+	// received any HTLCs.
+	fwdPkg, _, _, err = bobChannel.ReceiveRevocation(aliceRevocation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fwdPkg.Adds) != 0 {
+		t.Fatalf("bob should forward 4 hltcs, instead has %v",
+			len(fwdPkg.Adds))
+	}
+	if len(fwdPkg.SettleFails) != 0 {
+		t.Fatalf("bob should forward 0 hltcs, instead has %v",
+			len(fwdPkg.SettleFails))
+	}
+
+	// Finally, have Bob initiate a state transition that locks in the Fail
+	// added after the restart.
+	aliceSig, aliceHtlcSigs, err = aliceChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = bobChannel.ReceiveNewCommitment(aliceSig, aliceHtlcSigs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobRevocation, _, err = bobChannel.RevokeCurrentCommitment()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// When Alice receives the revocation, she should detect that she
+	// can now forward the freshly locked-in Fail.
+	_, adds, settleFails, err = aliceChannel.ReceiveRevocation(bobRevocation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(adds) != 0 {
+		t.Fatalf("alice shouldn't forward any HTLC's, instead wants to "+
+			"forward %v htlcs", len(adds))
+	}
+	if len(settleFails) != 1 {
+		t.Fatalf("alice should only forward one HTLC, instead wants to "+
+			"forward %v htlcs", len(settleFails))
+	}
+	if settleFails[0].ParentIndex != htlc2.ID {
+		t.Fatalf("alice should forward fail for htlcid=%d, instead "+
+			"forwarding id=%d", htlc2.ID,
+			settleFails[0].ParentIndex)
 	}
 }
 
@@ -4140,7 +4255,7 @@ func TestInvalidCommitSigError(t *testing.T) {
 	t.Parallel()
 
 	// First, we'll make a channel between Alice and Bob.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -4150,7 +4265,7 @@ func TestInvalidCommitSigError(t *testing.T) {
 	// Alice to Bob.
 	var htlcAmt lnwire.MilliSatoshi = 100000
 	htlc, _ := createHTLC(0, htlcAmt)
-	if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+	if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
 	if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
@@ -4187,7 +4302,7 @@ func TestChannelUnilateralCloseHtlcResolution(t *testing.T) {
 	// Create a test channel which will be used for the duration of this
 	// unittest. The channel will be funded evenly with Alice having 5 BTC,
 	// and Bob having 5 BTC.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(3)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -4197,14 +4312,14 @@ func TestChannelUnilateralCloseHtlcResolution(t *testing.T) {
 	// initiating enough state transitions to lock both of them in.
 	htlcAmount := lnwire.NewMSatFromSatoshis(20000)
 	htlcAlice, _ := createHTLC(0, htlcAmount)
-	if _, err := aliceChannel.AddHTLC(htlcAlice); err != nil {
+	if _, err := aliceChannel.AddHTLC(htlcAlice, nil); err != nil {
 		t.Fatalf("alice unable to add htlc: %v", err)
 	}
 	if _, err := bobChannel.ReceiveHTLC(htlcAlice); err != nil {
 		t.Fatalf("bob unable to recv add htlc: %v", err)
 	}
 	htlcBob, preimageBob := createHTLC(0, htlcAmount)
-	if _, err := bobChannel.AddHTLC(htlcBob); err != nil {
+	if _, err := bobChannel.AddHTLC(htlcBob, nil); err != nil {
 		t.Fatalf("bob unable to add htlc: %v", err)
 	}
 	if _, err := aliceChannel.ReceiveHTLC(htlcBob); err != nil {
@@ -4238,8 +4353,8 @@ func TestChannelUnilateralCloseHtlcResolution(t *testing.T) {
 		SpenderTxHash: &commitTxHash,
 	}
 	aliceCloseSummary, err := NewUnilateralCloseSummary(
-		aliceChannel.channelState, aliceChannel.signer, aliceChannel.pCache,
-		spendDetail, aliceChannel.channelState.RemoteCommitment,
+		aliceChannel.channelState, aliceChannel.Signer, aliceChannel.pCache,
+		spendDetail, aliceChannel.channelState.RemoteCommitment, false,
 	)
 	if err != nil {
 		t.Fatalf("unable to create alice close summary: %v", err)
@@ -4281,7 +4396,7 @@ func TestChannelUnilateralCloseHtlcResolution(t *testing.T) {
 	// With the transaction constructed, we'll generate a witness that
 	// should be valid for it, and verify using an instance of Script.
 	sweepTx.TxIn[0].Witness, err = receiverHtlcSpendTimeout(
-		aliceChannel.signer, &outHtlcResolution.SweepSignDesc,
+		aliceChannel.Signer, &outHtlcResolution.SweepSignDesc,
 		sweepTx, int32(outHtlcResolution.Expiry),
 	)
 	if err != nil {
@@ -4315,7 +4430,7 @@ func TestChannelUnilateralCloseHtlcResolution(t *testing.T) {
 		sweepTx,
 	)
 	sweepTx.TxIn[0].Witness, err = SenderHtlcSpendRedeem(
-		aliceChannel.signer, &inHtlcResolution.SweepSignDesc,
+		aliceChannel.Signer, &inHtlcResolution.SweepSignDesc,
 		sweepTx, preimageBob[:],
 	)
 	if err != nil {
@@ -4338,6 +4453,121 @@ func TestChannelUnilateralCloseHtlcResolution(t *testing.T) {
 	}
 }
 
+// TestChannelUnilateralClosePendingCommit tests that if the remote party
+// broadcasts their pending commit (hasn't yet revoked the lower one), then
+// we'll create a proper unilateral channel clsoure that can sweep the created
+// outputs.
+func TestChannelUnilateralClosePendingCommit(t *testing.T) {
+	t.Parallel()
+
+	// Create a test channel which will be used for the duration of this
+	// unittest. The channel will be funded evenly with Alice having 5 BTC,
+	// and Bob having 5 BTC.
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
+	if err != nil {
+		t.Fatalf("unable to create test channels: %v", err)
+	}
+	defer cleanUp()
+
+	// First, we'll add an HTLC from Alice to Bob, just to be be able to
+	// create a new state transition.
+	htlcAmount := lnwire.NewMSatFromSatoshis(20000)
+	htlcAlice, _ := createHTLC(0, htlcAmount)
+	if _, err := aliceChannel.AddHTLC(htlcAlice, nil); err != nil {
+		t.Fatalf("alice unable to add htlc: %v", err)
+	}
+	if _, err := bobChannel.ReceiveHTLC(htlcAlice); err != nil {
+		t.Fatalf("bob unable to recv add htlc: %v", err)
+	}
+
+	// With the HTLC added, we'll now manually initiate a state transition
+	// from Alice to Bob.
+	_, _, err = aliceChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// At this point, Alice's commitment chain should have a new pending
+	// commit for Bob. We'll extract it so we can simulate Bob broadcasting
+	// the commitment due to an issue.
+	bobCommit := aliceChannel.remoteCommitChain.tip().txn
+	bobTxHash := bobCommit.TxHash()
+	spendDetail := &chainntnfs.SpendDetail{
+		SpenderTxHash: &bobTxHash,
+		SpendingTx:    bobCommit,
+	}
+
+	// At this point, if we attempt to create a unilateral close summary
+	// using this commitment, but with the wrong state, we should find that
+	// our output wasn't picked up.
+	aliceWrongCloseSummary, err := NewUnilateralCloseSummary(
+		aliceChannel.channelState, aliceChannel.Signer, aliceChannel.pCache,
+		spendDetail, aliceChannel.channelState.RemoteCommitment, false,
+	)
+	if err != nil {
+		t.Fatalf("unable to create alice close summary: %v", err)
+	}
+
+	if aliceWrongCloseSummary.CommitResolution != nil {
+		t.Fatalf("alice shouldn't have found self output")
+	}
+
+	// If we create the close summary again, but this time use Alice's
+	// pending commit to Bob, then the unilateral close summary should be
+	// properly populated.
+	aliceRemoteChainTip, err := aliceChannel.channelState.RemoteCommitChainTip()
+	if err != nil {
+		t.Fatalf("unable to fetch remote chain tip: %v", err)
+	}
+	aliceCloseSummary, err := NewUnilateralCloseSummary(
+		aliceChannel.channelState, aliceChannel.Signer, aliceChannel.pCache,
+		spendDetail, aliceRemoteChainTip.Commitment, true,
+	)
+	if err != nil {
+		t.Fatalf("unable to create alice close summary: %v", err)
+	}
+
+	// With this proper version, Alice's commit resolution should have been
+	// properly located.
+	if aliceCloseSummary.CommitResolution == nil {
+		t.Fatalf("unable to find alice's commit resolution")
+	}
+
+	aliceSignDesc := aliceCloseSummary.CommitResolution.SelfOutputSignDesc
+
+	// Finally, we'll ensure that we're able to properly sweep our output
+	// from using the materials within the unilateral close summary.
+	sweepTx := wire.NewMsgTx(2)
+	sweepTx.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: aliceCloseSummary.CommitResolution.SelfOutPoint,
+	})
+	sweepTx.AddTxOut(&wire.TxOut{
+		PkScript: testHdSeed[:],
+		Value:    aliceSignDesc.Output.Value,
+	})
+	aliceSignDesc.SigHashes = txscript.NewTxSigHashes(sweepTx)
+	sweepTx.TxIn[0].Witness, err = CommitSpendNoDelay(
+		aliceChannel.Signer, &aliceSignDesc, sweepTx,
+	)
+	if err != nil {
+		t.Fatalf("unable to generate sweep witness: %v", err)
+	}
+
+	// If we validate the signature on the new sweep transaction, it should
+	// be fully valid.
+	vm, err := txscript.NewEngine(
+		aliceSignDesc.Output.PkScript,
+		sweepTx, 0, txscript.StandardVerifyFlags, nil,
+		nil, aliceSignDesc.Output.Value,
+	)
+	if err != nil {
+		t.Fatalf("unable to create engine: %v", err)
+	}
+	if err := vm.Execute(); err != nil {
+		t.Fatalf("htlc timeout spend is invalid: %v", err)
+	}
+}
+
 // TestDesyncHTLCs checks that we cannot add HTLCs that would make the
 // balance negative, when the remote and local update logs are desynced.
 func TestDesyncHTLCs(t *testing.T) {
@@ -4345,7 +4575,7 @@ func TestDesyncHTLCs(t *testing.T) {
 
 	// We'll kick off the test by creating our channels which both are
 	// loaded with 5 BTC each.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -4354,7 +4584,7 @@ func TestDesyncHTLCs(t *testing.T) {
 	// First add one HTLC of value 4.1 BTC.
 	htlcAmt := lnwire.NewMSatFromSatoshis(4.1 * btcutil.SatoshiPerBitcoin)
 	htlc, _ := createHTLC(0, htlcAmt)
-	aliceIndex, err := aliceChannel.AddHTLC(htlc)
+	aliceIndex, err := aliceChannel.AddHTLC(htlc, nil)
 	if err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
@@ -4368,8 +4598,9 @@ func TestDesyncHTLCs(t *testing.T) {
 		t.Fatalf("unable to complete state update: %v", err)
 	}
 
-	// Now let let Bob fail this HTLC.
-	if err := bobChannel.FailHTLC(bobIndex, []byte("failreason")); err != nil {
+	// Now let Bob fail this HTLC.
+	err = bobChannel.FailHTLC(bobIndex, []byte("failreason"), nil, nil, nil)
+	if err != nil {
 		t.Fatalf("unable to cancel HTLC: %v", err)
 	}
 	if err := aliceChannel.ReceiveFailHTLC(aliceIndex, []byte("bad")); err != nil {
@@ -4386,8 +4617,9 @@ func TestDesyncHTLCs(t *testing.T) {
 	// balance is unavailable.
 	htlcAmt = lnwire.NewMSatFromSatoshis(1 * btcutil.SatoshiPerBitcoin)
 	htlc, _ = createHTLC(1, htlcAmt)
-	if _, err = aliceChannel.AddHTLC(htlc); err != ErrBelowChanReserve {
-		t.Fatalf("expected ErrBelowChanReserve, instead received: %v", err)
+	if _, err = aliceChannel.AddHTLC(htlc, nil); err != ErrBelowChanReserve {
+		t.Fatalf("expected ErrInsufficientBalance, instead received: %v",
+			err)
 	}
 
 	// Now do a state transition, which will ACK the FailHTLC, making Alice
@@ -4395,7 +4627,7 @@ func TestDesyncHTLCs(t *testing.T) {
 	if err := forceStateTransition(aliceChannel, bobChannel); err != nil {
 		t.Fatalf("unable to complete state update: %v", err)
 	}
-	if _, err = aliceChannel.AddHTLC(htlc); err != nil {
+	if _, err = aliceChannel.AddHTLC(htlc, nil); err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
 }
@@ -4410,7 +4642,7 @@ func TestMaxAcceptedHTLCs(t *testing.T) {
 
 	// We'll kick off the test by creating our channels which both are
 	// loaded with 5 BTC each.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -4437,7 +4669,7 @@ func TestMaxAcceptedHTLCs(t *testing.T) {
 	// Send the maximum allowed number of HTLCs.
 	for i := 0; i < numHTLCs; i++ {
 		htlc, _ := createHTLC(i, htlcAmt)
-		if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+		if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 			t.Fatalf("unable to add htlc: %v", err)
 		}
 		if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
@@ -4447,7 +4679,7 @@ func TestMaxAcceptedHTLCs(t *testing.T) {
 
 	// The next HTLC should fail with ErrMaxHTLCNumber.
 	htlc, _ := createHTLC(numHTLCs, htlcAmt)
-	_, err = aliceChannel.AddHTLC(htlc)
+	_, err = aliceChannel.AddHTLC(htlc, nil)
 	if err != ErrMaxHTLCNumber {
 		t.Fatalf("expected ErrMaxHTLCNumber, instead received: %v", err)
 	}
@@ -4471,7 +4703,7 @@ func TestMaxPendingAmount(t *testing.T) {
 
 	// We'll kick off the test by creating our channels which both are
 	// loaded with 5 BTC each.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -4494,7 +4726,7 @@ func TestMaxPendingAmount(t *testing.T) {
 	htlcAmt := lnwire.NewMSatFromSatoshis(1.5 * btcutil.SatoshiPerBitcoin)
 	for i := 0; i < numHTLCs; i++ {
 		htlc, _ := createHTLC(i, htlcAmt)
-		if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+		if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 			t.Fatalf("unable to add htlc: %v", err)
 		}
 		if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
@@ -4506,7 +4738,7 @@ func TestMaxPendingAmount(t *testing.T) {
 	// SHOULD trigger Alice's ErrMaxPendingAmount error.
 	htlcAmt = lnwire.NewMSatFromSatoshis(0.1 * btcutil.SatoshiPerBitcoin)
 	htlc, _ := createHTLC(numHTLCs, htlcAmt)
-	_, err = aliceChannel.AddHTLC(htlc)
+	_, err = aliceChannel.AddHTLC(htlc, nil)
 	if err != ErrMaxPendingAmount {
 		t.Fatalf("expected ErrMaxPendingAmount, instead received: %v", err)
 	}
@@ -4522,36 +4754,66 @@ func TestMaxPendingAmount(t *testing.T) {
 	}
 }
 
-// TestChanReserve tests that the ErrBelowChanReserve error is thrown when
-// an HTLC is added that causes a node's balance to dip below its channel
-// reserve limit.
+func assertChannelBalances(t *testing.T, alice, bob *LightningChannel,
+	aliceBalance, bobBalance btcutil.Amount) {
+
+	_, _, line, _ := runtime.Caller(1)
+
+	aliceSelfBalance := alice.channelState.LocalCommitment.LocalBalance.ToSatoshis()
+	aliceBobBalance := alice.channelState.LocalCommitment.RemoteBalance.ToSatoshis()
+	if aliceSelfBalance != aliceBalance {
+		t.Fatalf("line #%v: wrong alice self balance: expected %v, got %v",
+			line, aliceBalance, aliceSelfBalance)
+	}
+	if aliceBobBalance != bobBalance {
+		t.Fatalf("line #%v: wrong alice bob's balance: expected %v, got %v",
+			line, bobBalance, aliceBobBalance)
+	}
+
+	bobSelfBalance := bob.channelState.LocalCommitment.LocalBalance.ToSatoshis()
+	bobAliceBalance := bob.channelState.LocalCommitment.RemoteBalance.ToSatoshis()
+	if bobSelfBalance != bobBalance {
+		t.Fatalf("line #%v: wrong bob self balance: expected %v, got %v",
+			line, bobBalance, bobSelfBalance)
+	}
+	if bobAliceBalance != aliceBalance {
+		t.Fatalf("line #%v: wrong alice bob's balance: expected %v, got %v",
+			line, aliceBalance, bobAliceBalance)
+	}
+}
+
+// TestChanReserve tests that the ErrBelowChanReserve error is thrown when an
+// HTLC is added that causes a node's balance to dip below its channel reserve
+// limit.
 func TestChanReserve(t *testing.T) {
 	t.Parallel()
 
 	setupChannels := func() (*LightningChannel, *LightningChannel, func()) {
-		// We'll kick off the test by creating our channels which both are
-		// loaded with 5 BTC each.
-		aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+		// We'll kick off the test by creating our channels which both
+		// are loaded with 5 BTC each.
+		aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 		if err != nil {
 			t.Fatalf("unable to create test channels: %v", err)
 		}
 
 		// We set the remote required ChanReserve to 0.5 BTC. We will
-		// attempt to cause Alice's balance to dip below this amount and test
-		// whether it triggers the ErrBelowChanReserve error.
-		aliceMinReserve := btcutil.Amount(0.5 * btcutil.SatoshiPerBitcoin)
+		// attempt to cause Alice's balance to dip below this amount
+		// and test whether it triggers the ErrBelowChanReserve error.
+		aliceMinReserve := btcutil.Amount(0.5 *
+			btcutil.SatoshiPerBitcoin)
 
-		// Alice will need to keep her reserve above aliceMinReserve, so
-		// set this limit to here local config.
+		// Alice will need to keep her reserve above aliceMinReserve,
+		// so set this limit to here local config.
 		aliceChannel.localChanCfg.ChanReserve = aliceMinReserve
 
-		// During channel opening Bob will also get to know Alice's minimum
-		// reserve, and this will be found in his remote config.
+		// During channel opening Bob will also get to know Alice's
+		// minimum reserve, and this will be found in his remote
+		// config.
 		bobChannel.remoteChanCfg.ChanReserve = aliceMinReserve
 
-		// We set Bob's channel reserve to a value that is larger than his
-		// current balance in the channel. This will ensure that after a
-		// channel is first opened, Bob can still receive HTLCs
+		// We set Bob's channel reserve to a value that is larger than
+		// his current balance in the channel. This will ensure that
+		// after a channel is first opened, Bob can still receive HTLCs
 		// even though his balance is less than his channel reserve.
 		bobMinReserve := btcutil.Amount(6 * btcutil.SatoshiPerBitcoin)
 		bobChannel.localChanCfg.ChanReserve = bobMinReserve
@@ -4565,38 +4827,44 @@ func TestChanReserve(t *testing.T) {
 	aliceIndex := 0
 	bobIndex := 0
 
-	// Add an HTLC that will increase Bob's balance. This should
-	// succeed, since Alice stays above her channel reserve, and
-	// Bob increases his balance (while still being below his
-	// channel reserve).
+	// Add an HTLC that will increase Bob's balance. This should succeed,
+	// since Alice stays above her channel reserve, and Bob increases his
+	// balance (while still being below his channel reserve).
+	//
 	// Resulting balances:
 	//	Alice:	4.5
-	//	Bob:	5.5
+	//	Bob:	5.0
 	htlcAmt := lnwire.NewMSatFromSatoshis(0.5 * btcutil.SatoshiPerBitcoin)
 	htlc, _ := createHTLC(aliceIndex, htlcAmt)
 	aliceIndex++
-	if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+	if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
 	if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
 		t.Fatalf("unable to recv htlc: %v", err)
 	}
 
-	// Force a state transation, making sure this HTLC is considered
-	// valid even though the channel reserves are not met.
+	// Force a state transition, making sure this HTLC is considered valid
+	// even though the channel reserves are not met.
 	if err := forceStateTransition(aliceChannel, bobChannel); err != nil {
 		t.Fatalf("unable to complete state update: %v", err)
 	}
 
-	// Now let Bob try to add an HTLC. This should fail, since it
-	// will decrease his balance, which is already below the channel
-	// reserve.
+	commitFee := aliceChannel.channelState.LocalCommitment.CommitFee
+	assertChannelBalances(
+		t, aliceChannel, bobChannel,
+		btcutil.SatoshiPerBitcoin*4.5-commitFee, btcutil.SatoshiPerBitcoin*5,
+	)
+
+	// Now let Bob try to add an HTLC. This should fail, since it will
+	// decrease his balance, which is already below the channel reserve.
+	//
 	// Resulting balances:
 	//	Alice:	4.5
-	//	Bob:	5.5
+	//	Bob:	5.0
 	htlc, _ = createHTLC(bobIndex, htlcAmt)
 	bobIndex++
-	_, err := bobChannel.AddHTLC(htlc)
+	_, err := bobChannel.AddHTLC(htlc, nil)
 	if err != ErrBelowChanReserve {
 		t.Fatalf("expected ErrBelowChanReserve, instead received: %v", err)
 	}
@@ -4618,8 +4886,9 @@ func TestChanReserve(t *testing.T) {
 	aliceIndex = 0
 	bobIndex = 0
 
-	// Now we'll add HTLC of 3.5 BTC to Alice's commitment, this should
-	// put Alice's balance at 1.5 BTC.
+	// Now we'll add HTLC of 3.5 BTC to Alice's commitment, this should put
+	// Alice's balance at 1.5 BTC.
+	//
 	// Resulting balances:
 	//	Alice:	1.5
 	//	Bob:	9.5
@@ -4628,7 +4897,7 @@ func TestChanReserve(t *testing.T) {
 	// The first HTLC should successfully be sent.
 	htlc, _ = createHTLC(aliceIndex, htlcAmt)
 	aliceIndex++
-	if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+	if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
 	if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
@@ -4636,13 +4905,13 @@ func TestChanReserve(t *testing.T) {
 	}
 
 	// Add a second HTLC of 1 BTC. This should fail because it will take
-	// Alice's balance all the way down to her channel reserve, but
-	// since she is the initiator the additional transaction fee makes
-	// her balance dip below.
+	// Alice's balance all the way down to her channel reserve, but since
+	// she is the initiator the additional transaction fee makes her
+	// balance dip below.
 	htlcAmt = lnwire.NewMSatFromSatoshis(1 * btcutil.SatoshiPerBitcoin)
 	htlc, _ = createHTLC(aliceIndex, htlcAmt)
 	aliceIndex++
-	_, err = aliceChannel.AddHTLC(htlc)
+	_, err = aliceChannel.AddHTLC(htlc, nil)
 	if err != ErrBelowChanReserve {
 		t.Fatalf("expected ErrBelowChanReserve, instead received: %v", err)
 	}
@@ -4672,7 +4941,7 @@ func TestChanReserve(t *testing.T) {
 	htlcAmt = lnwire.NewMSatFromSatoshis(2 * btcutil.SatoshiPerBitcoin)
 	htlc, preimage := createHTLC(aliceIndex, htlcAmt)
 	aliceIndex++
-	aliceHtlcIndex, err := aliceChannel.AddHTLC(htlc)
+	aliceHtlcIndex, err := aliceChannel.AddHTLC(htlc, nil)
 	if err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
@@ -4680,29 +4949,55 @@ func TestChanReserve(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to recv htlc: %v", err)
 	}
-	if err := bobChannel.SettleHTLC(preimage, bobHtlcIndex); err != nil {
+	if err := forceStateTransition(aliceChannel, bobChannel); err != nil {
+		t.Fatalf("unable to complete state update: %v", err)
+	}
+
+	commitFee = aliceChannel.channelState.LocalCommitment.CommitFee
+	assertChannelBalances(
+		t, aliceChannel, bobChannel,
+		btcutil.SatoshiPerBitcoin*3-commitFee, btcutil.SatoshiPerBitcoin*5,
+	)
+
+	if err := bobChannel.SettleHTLC(preimage, bobHtlcIndex, nil, nil, nil); err != nil {
 		t.Fatalf("bob unable to settle inbound htlc: %v", err)
 	}
 	if err := aliceChannel.ReceiveHTLCSettle(preimage, aliceHtlcIndex); err != nil {
 		t.Fatalf("alice unable to accept settle of outbound htlc: %v", err)
 	}
+	if err := forceStateTransition(bobChannel, aliceChannel); err != nil {
+		t.Fatalf("unable to complete state update: %v", err)
+	}
+
+	commitFee = aliceChannel.channelState.LocalCommitment.CommitFee
+	assertChannelBalances(
+		t, aliceChannel, bobChannel,
+		btcutil.SatoshiPerBitcoin*3-commitFee, btcutil.SatoshiPerBitcoin*7,
+	)
 
 	// And now let Bob add an HTLC of 1 BTC. This will take Bob's balance
-	// all the way down to his channel reserve, but since he is not paying the
-	// fee this is okay.
+	// all the way down to his channel reserve, but since he is not paying
+	// the fee this is okay.
 	htlcAmt = lnwire.NewMSatFromSatoshis(1 * btcutil.SatoshiPerBitcoin)
 	htlc, _ = createHTLC(bobIndex, htlcAmt)
 	bobIndex++
-	if _, err := bobChannel.AddHTLC(htlc); err != nil {
+	if _, err := bobChannel.AddHTLC(htlc, nil); err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
 	if _, err := aliceChannel.ReceiveHTLC(htlc); err != nil {
 		t.Fatalf("unable to recv htlc: %v", err)
 	}
+
 	// Do a last state transition, which should succeed.
-	if err := forceStateTransition(aliceChannel, bobChannel); err != nil {
+	if err := forceStateTransition(bobChannel, aliceChannel); err != nil {
 		t.Fatalf("unable to complete state update: %v", err)
 	}
+
+	commitFee = aliceChannel.channelState.LocalCommitment.CommitFee
+	assertChannelBalances(
+		t, aliceChannel, bobChannel,
+		btcutil.SatoshiPerBitcoin*3-commitFee, btcutil.SatoshiPerBitcoin*6,
+	)
 }
 
 // TestMinHTLC tests that the ErrBelowMinHTLC error is thrown if an HTLC is added
@@ -4712,7 +5007,7 @@ func TestMinHTLC(t *testing.T) {
 
 	// We'll kick off the test by creating our channels which both are
 	// loaded with 5 BTC each.
-	aliceChannel, bobChannel, cleanUp, err := createTestChannels(1)
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
 	if err != nil {
 		t.Fatalf("unable to create test channels: %v", err)
 	}
@@ -4731,7 +5026,7 @@ func TestMinHTLC(t *testing.T) {
 	// ErrBelowMinHTLC.
 	htlcAmt := lnwire.NewMSatFromSatoshis(0.5 * btcutil.SatoshiPerBitcoin)
 	htlc, _ := createHTLC(0, htlcAmt)
-	if _, err := aliceChannel.AddHTLC(htlc); err != nil {
+	if _, err := aliceChannel.AddHTLC(htlc, nil); err != nil {
 		t.Fatalf("unable to add htlc: %v", err)
 	}
 	if _, err := bobChannel.ReceiveHTLC(htlc); err != nil {
@@ -4742,7 +5037,7 @@ func TestMinHTLC(t *testing.T) {
 	// an ErrBelowMinHTLC error.
 	amt := minValue - 100
 	htlc, _ = createHTLC(1, amt)
-	_, err = aliceChannel.AddHTLC(htlc)
+	_, err = aliceChannel.AddHTLC(htlc, nil)
 	if err != ErrBelowMinHTLC {
 		t.Fatalf("expected ErrBelowMinHTLC, instead received: %v", err)
 	}
@@ -4757,4 +5052,825 @@ func TestMinHTLC(t *testing.T) {
 	if err != ErrBelowMinHTLC {
 		t.Fatalf("expected ErrBelowMinHTLC, instead received: %v", err)
 	}
+}
+
+// TestNewBreachRetributionSkipsDustHtlcs ensures that in the case of a
+// contract breach, all dust HTLCs are ignored and not reflected in the
+// produced BreachRetribution struct. We ignore these HTLCs as they aren't
+// actually manifested on the commitment transaction, as a result we can't
+// actually revoked them.
+func TestNewBreachRetributionSkipsDustHtlcs(t *testing.T) {
+	t.Parallel()
+
+	// We'll kick off the test by creating our channels which both are
+	// loaded with 5 BTC each.
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
+	if err != nil {
+		t.Fatalf("unable to create test channels: %v", err)
+	}
+	defer cleanUp()
+
+	var fakeOnionBlob [lnwire.OnionPacketSize]byte
+	copy(fakeOnionBlob[:], bytes.Repeat([]byte{0x05}, lnwire.OnionPacketSize))
+
+	// We'll modify the dust settings on both channels to be a predictable
+	// value for the prurpose of the test.
+	dustValue := btcutil.Amount(200)
+	aliceChannel.channelState.LocalChanCfg.DustLimit = dustValue
+	aliceChannel.channelState.RemoteChanCfg.DustLimit = dustValue
+	bobChannel.channelState.LocalChanCfg.DustLimit = dustValue
+	bobChannel.channelState.RemoteChanCfg.DustLimit = dustValue
+
+	// We'll now create a series of dust HTLC's, and send then from Alice
+	// to Bob, finally locking both of them in.
+	var bobPreimage [32]byte
+	copy(bobPreimage[:], bytes.Repeat([]byte{0xbb}, 32))
+	for i := 0; i < 3; i++ {
+		rHash := sha256.Sum256(bobPreimage[:])
+		h := &lnwire.UpdateAddHTLC{
+			PaymentHash: rHash,
+			Amount:      lnwire.NewMSatFromSatoshis(dustValue),
+			Expiry:      uint32(10),
+			OnionBlob:   fakeOnionBlob,
+		}
+
+		htlcIndex, err := aliceChannel.AddHTLC(h, nil)
+		if err != nil {
+			t.Fatalf("unable to add bob's htlc: %v", err)
+		}
+
+		h.ID = htlcIndex
+		if _, err := bobChannel.ReceiveHTLC(h); err != nil {
+			t.Fatalf("unable to recv bob's htlc: %v", err)
+		}
+	}
+
+	// With the HTLC's applied to both update logs, we'll initiate a state
+	// transition from Alice.
+	if err := forceStateTransition(bobChannel, aliceChannel); err != nil {
+		t.Fatalf("unable to complete bob's state transition: %v", err)
+	}
+
+	// At this point, we'll capture the current state number, as well as
+	// the current commitment.
+	revokedCommit := bobChannel.channelState.LocalCommitment.CommitTx
+	revokedStateNum := aliceChannel.channelState.LocalCommitment.CommitHeight
+
+	// We'll now have Bob settle those HTLC's to Alice and then advance
+	// forward to a new state.
+	for i := 0; i < 3; i++ {
+		err := bobChannel.SettleHTLC(bobPreimage, uint64(i), nil, nil, nil)
+		if err != nil {
+			t.Fatalf("unable to settle htlc: %v", err)
+		}
+		err = aliceChannel.ReceiveHTLCSettle(bobPreimage, uint64(i))
+		if err != nil {
+			t.Fatalf("unable to settle htlc: %v", err)
+		}
+	}
+	if err := forceStateTransition(bobChannel, aliceChannel); err != nil {
+		t.Fatalf("unable to complete bob's state transition: %v", err)
+	}
+
+	// At this point, we'll now simulate a contract breach by Bob using the
+	// NewBreachRetribution method.
+	breachRet, err := NewBreachRetribution(
+		aliceChannel.channelState, revokedStateNum, revokedCommit, 100,
+	)
+	if err != nil {
+		t.Fatalf("unable to create breach retribution: %v", err)
+	}
+
+	// The retribution shouldn't have any HTLCs set as they were all below
+	// dust for both parties.
+	if len(breachRet.HtlcRetributions) != 0 {
+		t.Fatalf("zero HTLC retributions should have been created, "+
+			"instead %v were", len(breachRet.HtlcRetributions))
+	}
+}
+
+// compareHtlcs compares two PaymentDescriptors.
+func compareHtlcs(htlc1, htlc2 *PaymentDescriptor) error {
+	if htlc1.LogIndex != htlc2.LogIndex {
+		return fmt.Errorf("htlc log index did not match")
+	}
+	if htlc1.HtlcIndex != htlc2.HtlcIndex {
+		return fmt.Errorf("htlc index did not match")
+	}
+	if htlc1.ParentIndex != htlc2.ParentIndex {
+		return fmt.Errorf("htlc parent index did not match")
+	}
+
+	if htlc1.RHash != htlc2.RHash {
+		return fmt.Errorf("htlc rhash did not match")
+	}
+	return nil
+}
+
+// compareIndexes is a helper method to compare two index maps.
+func compareIndexes(a, b map[uint64]*list.Element) error {
+	for k1, e1 := range a {
+		e2, ok := b[k1]
+		if !ok {
+			return fmt.Errorf("element with key %d "+
+				"not found in b", k1)
+		}
+		htlc1, htlc2 := e1.Value.(*PaymentDescriptor), e2.Value.(*PaymentDescriptor)
+		if err := compareHtlcs(htlc1, htlc2); err != nil {
+			return err
+		}
+	}
+
+	for k1, e1 := range b {
+		e2, ok := a[k1]
+		if !ok {
+			return fmt.Errorf("element with key %d not "+
+				"found in a", k1)
+		}
+		htlc1, htlc2 := e1.Value.(*PaymentDescriptor), e2.Value.(*PaymentDescriptor)
+		if err := compareHtlcs(htlc1, htlc2); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// compareLogs is a helper method to compare two updateLogs.
+func compareLogs(a, b *updateLog) error {
+	if a.logIndex != b.logIndex {
+		return fmt.Errorf("log indexes don't match: %d vs %d",
+			a.logIndex, b.logIndex)
+	}
+
+	if a.htlcCounter != b.htlcCounter {
+		return fmt.Errorf("htlc counters don't match: %d vs %d",
+			a.htlcCounter, b.htlcCounter)
+	}
+
+	if err := compareIndexes(a.updateIndex, b.updateIndex); err != nil {
+		return fmt.Errorf("update indexes don't match: %v", err)
+	}
+	if err := compareIndexes(a.htlcIndex, b.htlcIndex); err != nil {
+		return fmt.Errorf("htlc indexes don't match: %v", err)
+	}
+
+	if a.Len() != b.Len() {
+		return fmt.Errorf("list lengths not equal: %d vs %d",
+			a.Len(), b.Len())
+	}
+
+	e1, e2 := a.Front(), b.Front()
+	for ; e1 != nil; e1, e2 = e1.Next(), e2.Next() {
+		htlc1, htlc2 := e1.Value.(*PaymentDescriptor), e2.Value.(*PaymentDescriptor)
+		if err := compareHtlcs(htlc1, htlc2); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// TestChannelRestoreUpdateLogs makes sure we are able to properly restore the
+// update logs in the case where a different number of HTLCs are locked in on
+// the local, remote and pending remote commitment.
+func TestChannelRestoreUpdateLogs(t *testing.T) {
+	t.Parallel()
+
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
+	if err != nil {
+		t.Fatalf("unable to create test channels: %v", err)
+	}
+	defer cleanUp()
+
+	// First, we'll add an HTLC from Alice to Bob, which we will lock in on
+	// Bob's commit, but not on Alice's.
+	htlcAmount := lnwire.NewMSatFromSatoshis(20000)
+	htlcAlice, _ := createHTLC(0, htlcAmount)
+	if _, err := aliceChannel.AddHTLC(htlcAlice, nil); err != nil {
+		t.Fatalf("alice unable to add htlc: %v", err)
+	}
+	if _, err := bobChannel.ReceiveHTLC(htlcAlice); err != nil {
+		t.Fatalf("bob unable to recv add htlc: %v", err)
+	}
+
+	// Let Alice sign a new state, which will include the HTLC just sent.
+	aliceSig, aliceHtlcSigs, err := aliceChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("unable to sign commitment: %v", err)
+	}
+
+	// Bob receives this commitment signature, and revokes his old state.
+	err = bobChannel.ReceiveNewCommitment(aliceSig, aliceHtlcSigs)
+	if err != nil {
+		t.Fatalf("unable to receive commitment: %v", err)
+	}
+	bobRevocation, _, err := bobChannel.RevokeCurrentCommitment()
+	if err != nil {
+		t.Fatalf("unable to revoke commitment: %v", err)
+	}
+
+	// When Alice now receives this revocation, she will advance her remote
+	// commitment chain to the commitment which includes the HTLC just
+	// sent. However her local commitment chain still won't include the
+	// state with the HTLC, since she hasn't received a new commitment
+	// signature from Bob yet.
+	_, _, _, err = aliceChannel.ReceiveRevocation(bobRevocation)
+	if err != nil {
+		t.Fatalf("unable to recive revocation: %v", err)
+	}
+
+	// Now make Alice send and sign an additional HTLC. We don't let Bob
+	// receive it. We do this since we want to check that update logs are
+	// restored properly below, and we'll only restore updates that have
+	// been ACKed.
+	htlcAlice, _ = createHTLC(1, htlcAmount)
+	if _, err := aliceChannel.AddHTLC(htlcAlice, nil); err != nil {
+		t.Fatalf("alice unable to add htlc: %v", err)
+	}
+
+	// Send the signature covering the HTLC. This is okay, since the local
+	// and remote commit chains are updated in an async fashion. Since the
+	// remote chain was updated with the latest state (since Bob sent the
+	// revocation earlier) we can keep advancing the remote commit chain.
+	aliceSig, aliceHtlcSigs, err = aliceChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("unable to sign commitment: %v", err)
+	}
+
+	// After Alice has signed this commitment, her local commitment will
+	// contain no HTLCs, her remote commitment will contain an HTLC with
+	// index 0, and the pending remote commitment (a signed remote
+	// commitment which is not AKCed yet) will contain an additional HTLC
+	// with index 1.
+
+	// We now re-create the channels, mimicking a restart. This should sync
+	// the update logs up to the correct state set up above.
+	newAliceChannel, err := NewLightningChannel(
+		aliceChannel.Signer, nil, aliceChannel.channelState,
+	)
+	if err != nil {
+		t.Fatalf("unable to create new channel: %v", err)
+	}
+	defer newAliceChannel.Stop()
+
+	newBobChannel, err := NewLightningChannel(
+		bobChannel.Signer, nil, bobChannel.channelState,
+	)
+	if err != nil {
+		t.Fatalf("unable to create new channel: %v", err)
+	}
+	defer newBobChannel.Stop()
+
+	// compare all the logs between the old and new channels, to make sure
+	// they all got restored properly.
+	err = compareLogs(aliceChannel.localUpdateLog,
+		newAliceChannel.localUpdateLog)
+	if err != nil {
+		t.Fatalf("alice local log not restored: %v", err)
+	}
+
+	err = compareLogs(aliceChannel.remoteUpdateLog,
+		newAliceChannel.remoteUpdateLog)
+	if err != nil {
+		t.Fatalf("alice remote log not restored: %v", err)
+	}
+
+	err = compareLogs(bobChannel.localUpdateLog,
+		newBobChannel.localUpdateLog)
+	if err != nil {
+		t.Fatalf("bob local log not restored: %v", err)
+	}
+
+	err = compareLogs(bobChannel.remoteUpdateLog,
+		newBobChannel.remoteUpdateLog)
+	if err != nil {
+		t.Fatalf("bob remote log not restored: %v", err)
+	}
+}
+
+// fetchNumUpdates counts the number of updateType in the log.
+func fetchNumUpdates(t updateType, log *updateLog) int {
+	num := 0
+	for e := log.Front(); e != nil; e = e.Next() {
+		htlc := e.Value.(*PaymentDescriptor)
+		if htlc.EntryType == t {
+			num++
+		}
+	}
+	return num
+}
+
+// assertInLog checks that the given log contains the expected number of Adds
+// and Fails.
+func assertInLog(t *testing.T, log *updateLog, numAdds, numFails int) {
+	adds := fetchNumUpdates(Add, log)
+	if adds != numAdds {
+		t.Fatalf("expected %d adds, found %d", numAdds, adds)
+	}
+	fails := fetchNumUpdates(Fail, log)
+	if fails != numFails {
+		t.Fatalf("expected %d fails, found %d", numFails, fails)
+	}
+}
+
+// assertInLogs asserts that the expected number of Adds and Fails occurs in
+// the local and remote update log of the given channel.
+func assertInLogs(t *testing.T, channel *LightningChannel, numAddsLocal,
+	numFailsLocal, numAddsRemote, numFailsRemote int) {
+	assertInLog(t, channel.localUpdateLog, numAddsLocal, numFailsLocal)
+	assertInLog(t, channel.remoteUpdateLog, numAddsRemote, numFailsRemote)
+}
+
+// restoreAndAssert creates a new LightningChannel from the given channel's
+// state, and asserts that the new channel has had its logs restored to the
+// expected state.
+func restoreAndAssert(t *testing.T, channel *LightningChannel, numAddsLocal,
+	numFailsLocal, numAddsRemote, numFailsRemote int) {
+	newChannel, err := NewLightningChannel(
+		channel.Signer, nil, channel.channelState,
+	)
+	if err != nil {
+		t.Fatalf("unable to create new channel: %v", err)
+	}
+	defer newChannel.Stop()
+
+	assertInLog(t, newChannel.localUpdateLog, numAddsLocal, numFailsLocal)
+	assertInLog(t, newChannel.remoteUpdateLog, numAddsRemote, numFailsRemote)
+}
+
+// TesstChannelRestoreUpdateLogsFailedHTLC runs through a scenario where an
+// HTLC is added and failed, and asserts along the way that we would restore
+// the update logs of the channel to the expected state at any point.
+func TestChannelRestoreUpdateLogsFailedHTLC(t *testing.T) {
+	t.Parallel()
+
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
+	if err != nil {
+		t.Fatalf("unable to create test channels: %v", err)
+	}
+	defer cleanUp()
+
+	// First, we'll add an HTLC from Alice to Bob, and lock it in for both.
+	htlcAmount := lnwire.NewMSatFromSatoshis(20000)
+	htlcAlice, _ := createHTLC(0, htlcAmount)
+	if _, err := aliceChannel.AddHTLC(htlcAlice, nil); err != nil {
+		t.Fatalf("alice unable to add htlc: %v", err)
+	}
+	// The htlc Alice sent should be in her local update log.
+	assertInLogs(t, aliceChannel, 1, 0, 0, 0)
+
+	// A restore at this point should NOT restore this update, as it is not
+	// locked in anywhere yet.
+	restoreAndAssert(t, aliceChannel, 0, 0, 0, 0)
+
+	if _, err := bobChannel.ReceiveHTLC(htlcAlice); err != nil {
+		t.Fatalf("bob unable to recv add htlc: %v", err)
+	}
+
+	// Lock in the Add on both sides.
+	if err := forceStateTransition(aliceChannel, bobChannel); err != nil {
+		t.Fatalf("unable to complete state update: %v", err)
+	}
+
+	// Since it is locked in, Alice should have the Add in the local log,
+	// and it should be restored during restoration.
+	assertInLogs(t, aliceChannel, 1, 0, 0, 0)
+	restoreAndAssert(t, aliceChannel, 1, 0, 0, 0)
+
+	// Now we make Bob fail this HTLC.
+	err = bobChannel.FailHTLC(0, []byte("failreason"), nil, nil, nil)
+	if err != nil {
+		t.Fatalf("unable to cancel HTLC: %v", err)
+	}
+
+	err = aliceChannel.ReceiveFailHTLC(0, []byte("failreason"))
+	if err != nil {
+		t.Fatalf("unable to recv htlc cancel: %v", err)
+	}
+
+	// This Fail update should have been added to Alice's remote update log.
+	assertInLogs(t, aliceChannel, 1, 0, 0, 1)
+
+	// Restoring should restore the HTLC added to Alice's local log, but
+	// NOT the Fail sent by Bob, since it is not locked in.
+	restoreAndAssert(t, aliceChannel, 1, 0, 0, 0)
+
+	// Bob sends a signature.
+	bobSig, bobHtlcSigs, err := bobChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("unable to sign commitment: %v", err)
+	}
+	err = aliceChannel.ReceiveNewCommitment(bobSig, bobHtlcSigs)
+	if err != nil {
+		t.Fatalf("unable to receive commitment: %v", err)
+	}
+
+	// When Alice receives Bob's new commitment, the logs will stay the
+	// same until she revokes her old state. The Fail will still not be
+	// restored during a restoration.
+	assertInLogs(t, aliceChannel, 1, 0, 0, 1)
+	restoreAndAssert(t, aliceChannel, 1, 0, 0, 0)
+
+	aliceRevocation, _, err := aliceChannel.RevokeCurrentCommitment()
+	if err != nil {
+		t.Fatalf("unable to revoke commitment: %v", err)
+	}
+	_, _, _, err = bobChannel.ReceiveRevocation(aliceRevocation)
+	if err != nil {
+		t.Fatalf("bob unable to process alice's revocation: %v", err)
+	}
+
+	// At this point Alice has advanced her local commitment chain to a
+	// commitment with no HTLCs left. The current state on her remote
+	// commitment chain, however, still has the HTLC active, as she hasn't
+	// sent a new signature yet.
+	assertInLogs(t, aliceChannel, 1, 0, 0, 1)
+	restoreAndAssert(t, aliceChannel, 1, 0, 0, 0)
+
+	// Now send a signature from Alice. This will give Bob a new commitment
+	// where the HTLC is removed.
+	aliceSig, aliceHtlcSigs, err := aliceChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("unable to sign commitment: %v", err)
+	}
+	err = bobChannel.ReceiveNewCommitment(aliceSig, aliceHtlcSigs)
+	if err != nil {
+		t.Fatalf("unable to receive commitment: %v", err)
+	}
+
+	// When sending a new commitment, Alice will add a pending commit to
+	// here remote chain. In this case it doesn't contain any new updates,
+	// so it won't affect the restoration.
+	assertInLogs(t, aliceChannel, 1, 0, 0, 1)
+	restoreAndAssert(t, aliceChannel, 1, 0, 0, 0)
+
+	// When Alice receives Bob's revocation, the Fail is irrevocably locked
+	// in on both sides. She should compact the logs, removing the HTLC and
+	// the corresponding Fail from the local update log.
+	bobRevocation, _, err := bobChannel.RevokeCurrentCommitment()
+	if err != nil {
+		t.Fatalf("unable to revoke commitment: %v", err)
+	}
+	_, _, _, err = aliceChannel.ReceiveRevocation(bobRevocation)
+	if err != nil {
+		t.Fatalf("unable to receive revocation: %v", err)
+	}
+
+	assertInLogs(t, aliceChannel, 0, 0, 0, 0)
+	restoreAndAssert(t, aliceChannel, 0, 0, 0, 0)
+}
+
+// TestDuplicateFailRejection tests that if either party attempts to fail an
+// HTLC twice, then we'll reject the second fail attempt.
+func TestDuplicateFailRejection(t *testing.T) {
+	t.Parallel()
+
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
+	if err != nil {
+		t.Fatalf("unable to create test channels: %v", err)
+	}
+	defer cleanUp()
+
+	// First, we'll add an HTLC from Alice to Bob, and lock it in for both
+	// parties.
+	htlcAmount := lnwire.NewMSatFromSatoshis(20000)
+	htlcAlice, _ := createHTLC(0, htlcAmount)
+	if _, err := aliceChannel.AddHTLC(htlcAlice, nil); err != nil {
+		t.Fatalf("alice unable to add htlc: %v", err)
+	}
+	_, err = bobChannel.ReceiveHTLC(htlcAlice)
+	if err != nil {
+		t.Fatalf("unable to recv htlc: %v", err)
+	}
+
+	if err := forceStateTransition(aliceChannel, bobChannel); err != nil {
+		t.Fatalf("unable to complete state update: %v", err)
+	}
+
+	// With the HTLC locked in, we'll now have Bob fail the HTLC back to
+	// Alice.
+	err = bobChannel.FailHTLC(0, []byte("failreason"), nil, nil, nil)
+	if err != nil {
+		t.Fatalf("unable to cancel HTLC: %v", err)
+	}
+	if err := aliceChannel.ReceiveFailHTLC(0, []byte("bad")); err != nil {
+		t.Fatalf("unable to recv htlc cancel: %v", err)
+	}
+
+	// If we attempt to fail it AGAIN, then both sides should reject this
+	// second failure attempt.
+	err = bobChannel.FailHTLC(0, []byte("failreason"), nil, nil, nil)
+	if err == nil {
+		t.Fatalf("duplicate HTLC failure attempt should have failed")
+	}
+	if err := aliceChannel.ReceiveFailHTLC(0, []byte("bad")); err == nil {
+		t.Fatalf("duplicate HTLC failure attempt should have failed")
+	}
+
+	// We'll now have Bob sign a new commitment to lock in the HTLC fail
+	// for Alice.
+	_, _, err = bobChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("unable to sign commit: %v", err)
+	}
+
+	// We'll now force a restart for Bob and Alice, so we can test the
+	// persistence related portion of this assertion.
+	bobChannel, err = restartChannel(bobChannel)
+	if err != nil {
+		t.Fatalf("unable to restart channel: %v", err)
+	}
+	defer bobChannel.Stop()
+	aliceChannel, err = restartChannel(aliceChannel)
+	if err != nil {
+		t.Fatalf("unable to restart channel: %v", err)
+	}
+	defer aliceChannel.Stop()
+
+	// If we try to fail the same HTLC again, then we should get an error.
+	err = bobChannel.FailHTLC(0, []byte("failreason"), nil, nil, nil)
+	if err == nil {
+		t.Fatalf("duplicate HTLC failure attempt should have failed")
+	}
+
+	// Alice on the other hand should accept the failure again, as she
+	// dropped all items in the logs which weren't committed.
+	if err := aliceChannel.ReceiveFailHTLC(0, []byte("bad")); err != nil {
+		t.Fatalf("unable to recv htlc cancel: %v", err)
+	}
+}
+
+// TestDuplicateSettleRejection tests that if either party attempts to settle
+// an HTLC twice, then we'll reject the second settle attempt.
+func TestDuplicateSettleRejection(t *testing.T) {
+	t.Parallel()
+
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
+	if err != nil {
+		t.Fatalf("unable to create test channels: %v", err)
+	}
+	defer cleanUp()
+
+	// First, we'll add an HTLC from Alice to Bob, and lock it in for both
+	// parties.
+	htlcAmount := lnwire.NewMSatFromSatoshis(20000)
+	htlcAlice, alicePreimage := createHTLC(0, htlcAmount)
+	if _, err := aliceChannel.AddHTLC(htlcAlice, nil); err != nil {
+		t.Fatalf("alice unable to add htlc: %v", err)
+	}
+	_, err = bobChannel.ReceiveHTLC(htlcAlice)
+	if err != nil {
+		t.Fatalf("unable to recv htlc: %v", err)
+	}
+
+	if err := forceStateTransition(aliceChannel, bobChannel); err != nil {
+		t.Fatalf("unable to complete state update: %v", err)
+	}
+
+	// With the HTLC locked in, we'll now have Bob settle the HTLC back to
+	// Alice.
+	err = bobChannel.SettleHTLC(alicePreimage, uint64(0), nil, nil, nil)
+	if err != nil {
+		t.Fatalf("unable to cancel HTLC: %v", err)
+	}
+	err = aliceChannel.ReceiveHTLCSettle(alicePreimage, uint64(0))
+	if err != nil {
+		t.Fatalf("unable to recv htlc cancel: %v", err)
+	}
+
+	// If we attempt to fail it AGAIN, then both sides should reject this
+	// second failure attempt.
+	err = bobChannel.SettleHTLC(alicePreimage, uint64(0), nil, nil, nil)
+	if err == nil {
+		t.Fatalf("duplicate HTLC failure attempt should have failed")
+	}
+	err = aliceChannel.ReceiveHTLCSettle(alicePreimage, uint64(0))
+	if err == nil {
+		t.Fatalf("duplicate HTLC failure attempt should have failed")
+	}
+
+	// We'll now have Bob sign a new commitment to lock in the HTLC fail
+	// for Alice.
+	_, _, err = bobChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("unable to sign commit: %v", err)
+	}
+
+	// We'll now force a restart for Bob and Alice, so we can test the
+	// persistence related portion of this assertion.
+	bobChannel, err = restartChannel(bobChannel)
+	if err != nil {
+		t.Fatalf("unable to restart channel: %v", err)
+	}
+	defer bobChannel.Stop()
+	aliceChannel, err = restartChannel(aliceChannel)
+	if err != nil {
+		t.Fatalf("unable to restart channel: %v", err)
+	}
+	defer aliceChannel.Stop()
+
+	// If we try to fail the same HTLC again, then we should get an error.
+	err = bobChannel.SettleHTLC(alicePreimage, uint64(0), nil, nil, nil)
+	if err == nil {
+		t.Fatalf("duplicate HTLC failure attempt should have failed")
+	}
+
+	// Alice on the other hand should accept the failure again, as she
+	// dropped all items in the logs which weren't committed.
+	err = aliceChannel.ReceiveHTLCSettle(alicePreimage, uint64(0))
+	if err != nil {
+		t.Fatalf("unable to recv htlc cancel: %v", err)
+	}
+}
+
+// TestChannelRestoreCommitHeight tests that the local and remote commit
+// heights of HTLCs are set correctly across restores.
+func TestChannelRestoreCommitHeight(t *testing.T) {
+	t.Parallel()
+
+	aliceChannel, bobChannel, cleanUp, err := CreateTestChannels()
+	if err != nil {
+		t.Fatalf("unable to create test channels: %v", err)
+	}
+	defer cleanUp()
+
+	// helper method to check add heights of the htlcs found in the given
+	// log after a restore.
+	restoreAndAssertCommitHeights := func(t *testing.T,
+		channel *LightningChannel, remoteLog bool, htlcIndex uint64,
+		expLocal, expRemote uint64) *LightningChannel {
+
+		channel.Stop()
+		newChannel, err := NewLightningChannel(
+			channel.Signer, nil, channel.channelState,
+		)
+		if err != nil {
+			t.Fatalf("unable to create new channel: %v", err)
+		}
+
+		var pd *PaymentDescriptor
+		if remoteLog {
+			if newChannel.localUpdateLog.lookupHtlc(htlcIndex) != nil {
+				t.Fatalf("htlc found in wrong log")
+			}
+			pd = newChannel.remoteUpdateLog.lookupHtlc(htlcIndex)
+
+		} else {
+			if newChannel.remoteUpdateLog.lookupHtlc(htlcIndex) != nil {
+				t.Fatalf("htlc found in wrong log")
+			}
+			pd = newChannel.localUpdateLog.lookupHtlc(htlcIndex)
+		}
+		if pd == nil {
+			t.Fatalf("htlc not found in log")
+		}
+
+		if pd.addCommitHeightLocal != expLocal {
+			t.Fatalf("expected local add height to be %d, was %d",
+				expLocal, pd.addCommitHeightLocal)
+		}
+		if pd.addCommitHeightRemote != expRemote {
+			t.Fatalf("expected remote add height to be %d, was %d",
+				expRemote, pd.addCommitHeightRemote)
+		}
+		return newChannel
+	}
+
+	// We'll send an HtLC from Alice to Bob.
+	htlcAmount := lnwire.NewMSatFromSatoshis(100000000)
+	htlcAlice, _ := createHTLC(0, htlcAmount)
+	if _, err := aliceChannel.AddHTLC(htlcAlice, nil); err != nil {
+		t.Fatalf("alice unable to add htlc: %v", err)
+	}
+	if _, err := bobChannel.ReceiveHTLC(htlcAlice); err != nil {
+		t.Fatalf("bob unable to recv add htlc: %v", err)
+	}
+
+	// Let Alice sign a new state, which will include the HTLC just sent.
+	aliceSig, aliceHtlcSigs, err := aliceChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("unable to sign commitment: %v", err)
+	}
+
+	// The HTLC should only be on the pending remote commitment, so the
+	// only the remote add height should be set during a restore.
+	aliceChannel = restoreAndAssertCommitHeights(t, aliceChannel, false,
+		0, 0, 1)
+
+	// Bob receives this commitment signature, and revokes his old state.
+	err = bobChannel.ReceiveNewCommitment(aliceSig, aliceHtlcSigs)
+	if err != nil {
+		t.Fatalf("unable to receive commitment: %v", err)
+	}
+	bobRevocation, _, err := bobChannel.RevokeCurrentCommitment()
+	if err != nil {
+		t.Fatalf("unable to revoke commitment: %v", err)
+	}
+
+	// Now the HTLC is locked into Bob's commitment, a restoration should
+	// set only the local commit height, as it is not locked into Alice's
+	// yet.
+	bobChannel = restoreAndAssertCommitHeights(t, bobChannel, true, 0, 1, 0)
+
+	// Alice receives the revocation, ACKing her pending commitment.
+	_, _, _, err = aliceChannel.ReceiveRevocation(bobRevocation)
+	if err != nil {
+		t.Fatalf("unable to recive revocation: %v", err)
+	}
+
+	// However, the HTLC is still not locked into her local commitment, so
+	// the local add height should still be 0 after a restoration.
+	aliceChannel = restoreAndAssertCommitHeights(t, aliceChannel, false,
+		0, 0, 1)
+
+	// Now let Bob send the commitment signature making the HTLC lock in on
+	// Alice's commitment.
+	bobSig, bobHtlcSigs, err := bobChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("unable to sign commitment: %v", err)
+	}
+
+	// At this stage Bob has a pending remote commitment. Make sure
+	// restoring at this stage correcly restores the HTLC add commit
+	// heights.
+	bobChannel = restoreAndAssertCommitHeights(t, bobChannel, true, 0, 1, 1)
+
+	err = aliceChannel.ReceiveNewCommitment(bobSig, bobHtlcSigs)
+	if err != nil {
+		t.Fatalf("unable to receive commitment: %v", err)
+	}
+	aliceRevocation, _, err := aliceChannel.RevokeCurrentCommitment()
+	if err != nil {
+		t.Fatalf("unable to revoke commitment: %v", err)
+	}
+
+	// Now both the local and remote add heights should be properly set.
+	aliceChannel = restoreAndAssertCommitHeights(t, aliceChannel, false,
+		0, 1, 1)
+
+	_, _, _, err = bobChannel.ReceiveRevocation(aliceRevocation)
+	if err != nil {
+		t.Fatalf("unable to recive revocation: %v", err)
+	}
+
+	// Alice ACKing Bob's pending commitment shouldn't change the heights
+	// restored.
+	bobChannel = restoreAndAssertCommitHeights(t, bobChannel, true, 0, 1, 1)
+
+	// Send andother HTLC from Alice to Bob, to test whether already
+	// existing HTLCs (the HTLC with index 0) keep getting the add heights
+	// restored properly.
+	htlcAlice, _ = createHTLC(1, htlcAmount)
+	if _, err := aliceChannel.AddHTLC(htlcAlice, nil); err != nil {
+		t.Fatalf("alice unable to add htlc: %v", err)
+	}
+	if _, err := bobChannel.ReceiveHTLC(htlcAlice); err != nil {
+		t.Fatalf("bob unable to recv add htlc: %v", err)
+	}
+
+	// Send a new signature from Alice to Bob, making Alice have a pending
+	// remote commitment.
+	aliceSig, aliceHtlcSigs, err = aliceChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("unable to sign commitment: %v", err)
+	}
+
+	// A restoration should keep the add heights iof the first HTLC, and
+	// the new HTLC should have a remote add height 2.
+	aliceChannel = restoreAndAssertCommitHeights(t, aliceChannel, false,
+		0, 1, 1)
+	aliceChannel = restoreAndAssertCommitHeights(t, aliceChannel, false,
+		1, 0, 2)
+
+	err = bobChannel.ReceiveNewCommitment(aliceSig, aliceHtlcSigs)
+	if err != nil {
+		t.Fatalf("unable to receive commitment: %v", err)
+	}
+	bobRevocation, _, err = bobChannel.RevokeCurrentCommitment()
+	if err != nil {
+		t.Fatalf("unable to revoke commitment: %v", err)
+	}
+
+	// Since Bob just revoked another commitment, a restoration should
+	// increase the add height of the firt HTLC to 2, as we only keep the
+	// last unrevoked commitment. The new HTLC will also have a local add
+	// height of 2.
+	bobChannel = restoreAndAssertCommitHeights(t, bobChannel, true, 0, 2, 1)
+	bobChannel = restoreAndAssertCommitHeights(t, bobChannel, true, 1, 2, 0)
+
+	// Sign a new state for Alice, making Bob have a pending remote
+	// commitment.
+	bobSig, bobHtlcSigs, err = bobChannel.SignNextCommitment()
+	if err != nil {
+		t.Fatalf("unable to sign commitment: %v", err)
+	}
+
+	// The signing of a new commitment for Alice should have given the new
+	// HTLC an add height.
+	bobChannel = restoreAndAssertCommitHeights(t, bobChannel, true, 0, 2, 1)
+	bobChannel = restoreAndAssertCommitHeights(t, bobChannel, true, 1, 2, 2)
+
+	aliceChannel.Stop()
+	bobChannel.Stop()
 }

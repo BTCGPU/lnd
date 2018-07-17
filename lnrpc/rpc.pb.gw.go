@@ -187,9 +187,17 @@ func request_Lightning_PendingChannels_0(ctx context.Context, marshaler runtime.
 
 }
 
+var (
+	filter_Lightning_ListChannels_0 = &utilities.DoubleArray{Encoding: map[string]int{}, Base: []int(nil), Check: []int(nil)}
+)
+
 func request_Lightning_ListChannels_0(ctx context.Context, marshaler runtime.Marshaler, client LightningClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var protoReq ListChannelsRequest
 	var metadata runtime.ServerMetadata
+
+	if err := runtime.PopulateQueryParameters(&protoReq, req.URL.Query(), filter_Lightning_ListChannels_0); err != nil {
+		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
 
 	msg, err := client.ListChannels(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
@@ -584,7 +592,15 @@ func RegisterWalletUnlockerHandlerFromEndpoint(ctx context.Context, mux *runtime
 // RegisterWalletUnlockerHandler registers the http handlers for service WalletUnlocker to "mux".
 // The handlers forward requests to the grpc endpoint over "conn".
 func RegisterWalletUnlockerHandler(ctx context.Context, mux *runtime.ServeMux, conn *grpc.ClientConn) error {
-	client := NewWalletUnlockerClient(conn)
+	return RegisterWalletUnlockerHandlerClient(ctx, mux, NewWalletUnlockerClient(conn))
+}
+
+// RegisterWalletUnlockerHandler registers the http handlers for service WalletUnlocker to "mux".
+// The handlers forward requests to the grpc endpoint over the given implementation of "WalletUnlockerClient".
+// Note: the gRPC framework executes interceptors within the gRPC handler. If the passed in "WalletUnlockerClient"
+// doesn't go through the normal gRPC flow (creating a gRPC client etc.) then it will be up to the passed in
+// "WalletUnlockerClient" to call the correct interceptors.
+func RegisterWalletUnlockerHandlerClient(ctx context.Context, mux *runtime.ServeMux, client WalletUnlockerClient) error {
 
 	mux.Handle("GET", pattern_WalletUnlocker_GenSeed_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(ctx)
@@ -720,7 +736,15 @@ func RegisterLightningHandlerFromEndpoint(ctx context.Context, mux *runtime.Serv
 // RegisterLightningHandler registers the http handlers for service Lightning to "mux".
 // The handlers forward requests to the grpc endpoint over "conn".
 func RegisterLightningHandler(ctx context.Context, mux *runtime.ServeMux, conn *grpc.ClientConn) error {
-	client := NewLightningClient(conn)
+	return RegisterLightningHandlerClient(ctx, mux, NewLightningClient(conn))
+}
+
+// RegisterLightningHandler registers the http handlers for service Lightning to "mux".
+// The handlers forward requests to the grpc endpoint over the given implementation of "LightningClient".
+// Note: the gRPC framework executes interceptors within the gRPC handler. If the passed in "LightningClient"
+// doesn't go through the normal gRPC flow (creating a gRPC client etc.) then it will be up to the passed in
+// "LightningClient" to call the correct interceptors.
+func RegisterLightningHandlerClient(ctx context.Context, mux *runtime.ServeMux, client LightningClient) error {
 
 	mux.Handle("GET", pattern_Lightning_WalletBalance_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(ctx)

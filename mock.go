@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/lightningnetwork/lnd/chainntnfs"
-	"github.com/lightningnetwork/lnd/keychain"
-	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
-	"github.com/roasbeef/btcd/txscript"
 	"github.com/roasbeef/btcd/wire"
 	"github.com/roasbeef/btcutil"
+	btgTxscript "github.com/shelvenzhou/btgd/txscript"
+	"github.com/shelvenzhou/lnd/chainntnfs"
+	"github.com/shelvenzhou/lnd/keychain"
+	"github.com/shelvenzhou/lnd/lnwallet"
 )
 
 // The block height returned by the mock BlockChainIO's GetBestBlock.
@@ -42,7 +42,7 @@ func (m *mockSigner) SignOutputRaw(tx *wire.MsgTx,
 			signDesc.DoubleTweak)
 	}
 
-	sig, err := txscript.RawTxInWitnessSignature(tx, signDesc.SigHashes,
+	sig, err := btgTxscript.RawTxInWitnessSignature(tx, signDesc.SigHashes,
 		signDesc.InputIndex, amt, witnessScript, signDesc.HashType,
 		privKey)
 	if err != nil {
@@ -69,7 +69,7 @@ func (m *mockSigner) ComputeInputScript(tx *wire.MsgTx,
 			signDesc.DoubleTweak)
 	}
 
-	witnessScript, err := txscript.WitnessSignature(tx, signDesc.SigHashes,
+	witnessScript, err := btgTxscript.WitnessSignature(tx, signDesc.SigHashes,
 		signDesc.InputIndex, signDesc.Output.Value, signDesc.Output.PkScript,
 		signDesc.HashType, privKey, true)
 	if err != nil {
@@ -106,7 +106,7 @@ func (m *mockNotfier) Stop() error {
 	return nil
 }
 func (m *mockNotfier) RegisterSpendNtfn(outpoint *wire.OutPoint,
-	heightHint uint32) (*chainntnfs.SpendEvent, error) {
+	heightHint uint32, _ bool) (*chainntnfs.SpendEvent, error) {
 	return &chainntnfs.SpendEvent{
 		Spend:  make(chan *chainntnfs.SpendDetail),
 		Cancel: func() {},
@@ -130,7 +130,7 @@ func makeMockSpendNotifier() *mockSpendNotifier {
 }
 
 func (m *mockSpendNotifier) RegisterSpendNtfn(outpoint *wire.OutPoint,
-	heightHint uint32) (*chainntnfs.SpendEvent, error) {
+	heightHint uint32, _ bool) (*chainntnfs.SpendEvent, error) {
 
 	spendChan := make(chan *chainntnfs.SpendDetail)
 	m.spendMap[*outpoint] = append(m.spendMap[*outpoint], spendChan)

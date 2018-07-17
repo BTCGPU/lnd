@@ -9,13 +9,14 @@ import (
 	"sync/atomic"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/lightningnetwork/lnd/chainntnfs"
-	"github.com/lightningnetwork/lnd/channeldb"
-	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/roasbeef/btcd/blockchain"
 	"github.com/roasbeef/btcd/txscript"
 	"github.com/roasbeef/btcd/wire"
 	"github.com/roasbeef/btcutil"
+	btgTxscript "github.com/shelvenzhou/btgd/txscript"
+	"github.com/shelvenzhou/lnd/chainntnfs"
+	"github.com/shelvenzhou/lnd/channeldb"
+	"github.com/shelvenzhou/lnd/lnwallet"
 )
 
 //                          SUMMARY OF OUTPUT STATES
@@ -351,7 +352,7 @@ func (u *utxoNursery) IncubateOutputs(chanPoint wire.OutPoint,
 
 		// Kid outputs can be swept after an initial confirmation
 		// followed by a maturity period.Baby outputs are two stage and
-		// will need to wait for a absolute time out to reach a
+		// will need to wait for an absolute time out to reach a
 		// confirmation, then require a relative confirmation delay.
 		kidOutputs  = make([]kidOutput, 0, 1+len(incomingHtlcs))
 		babyOutputs = make([]babyOutput, 0, len(outgoingHtlcs))
@@ -910,15 +911,15 @@ func (u *utxoNursery) graduateClass(classHeight uint32) error {
 	return u.cfg.Store.GraduateHeight(classHeight)
 }
 
-// craftSweepTx accepts accepts a list of kindergarten outputs, and baby
-// outputs which don't required a second-layer claim, and signs and generates a
+// craftSweepTx accepts a list of kindergarten outputs, and baby
+// outputs which don't require a second-layer claim, and signs and generates a
 // signed txn that spends from them. This method also makes an accurate fee
 // estimate before generating the required witnesses.
 func (u *utxoNursery) createSweepTx(kgtnOutputs []kidOutput,
 	classHeight uint32) (*wire.MsgTx, error) {
 
 	// Create a transaction which sweeps all the newly mature outputs into
-	// a output controlled by the wallet.
+	// an output controlled by the wallet.
 
 	// TODO(roasbeef): can be more intelligent about buffering outputs to
 	// be more efficient on-chain.
@@ -1070,7 +1071,7 @@ func (u *utxoNursery) populateSweepTx(txVSize int64, classHeight uint32,
 		return nil, err
 	}
 
-	hashCache := txscript.NewTxSigHashes(sweepTx)
+	hashCache := btgTxscript.NewTxSigHashes(sweepTx)
 
 	// With all the inputs in place, use each output's unique witness
 	// function to generate the final witness required for spending.
@@ -1541,7 +1542,7 @@ func (c *contractMaturityReport) AddLimboStage2Htlc(kid *kidOutput) {
 	c.htlcs = append(c.htlcs, htlcReport)
 }
 
-// AddRecoveredHtlc adds an graduate output to the maturity report's htlcs, and
+// AddRecoveredHtlc adds a graduate output to the maturity report's htlcs, and
 // contributes its amount to the recovered balance.
 func (c *contractMaturityReport) AddRecoveredHtlc(kid *kidOutput) {
 	c.recoveredBalance += kid.Amount()

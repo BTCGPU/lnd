@@ -7,11 +7,13 @@ import (
 
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcd/wire"
+	"github.com/roasbeef/btcutil"
 
 	"github.com/lightninglabs/neutrino"
-	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/roasbeef/btcwallet/chain"
 	"github.com/roasbeef/btcwallet/waddrmgr"
+	btgChain "github.com/shelvenzhou/btgwallet/chain"
+	"github.com/shelvenzhou/lnd/lnwallet"
 )
 
 var (
@@ -77,14 +79,44 @@ func (b *BtcWallet) GetUtxo(op *wire.OutPoint, heightHint uint32) (*wire.TxOut, 
 			return nil, err
 		}
 
+		// We'll ensure we properly convert the amount given in BTC to
+		// satoshis.
+		amt, err := btcutil.NewAmount(txout.Value)
+		if err != nil {
+			return nil, err
+		}
+
 		return &wire.TxOut{
-			// Sadly, gettxout returns the output value in BTC
-			// instead of satoshis.
-			Value:    int64(txout.Value * 1e8),
+			Value:    int64(amt),
 			PkScript: pkScript,
 		}, nil
 
 	case *chain.BitcoindClient:
+		txout, err := backend.GetTxOut(&op.Hash, op.Index, false)
+		if err != nil {
+			return nil, err
+		} else if txout == nil {
+			return nil, ErrOutputSpent
+		}
+
+		pkScript, err := hex.DecodeString(txout.ScriptPubKey.Hex)
+		if err != nil {
+			return nil, err
+		}
+
+		// Sadly, gettxout returns the output value in BTC instead of
+		// satoshis.
+		amt, err := btcutil.NewAmount(txout.Value)
+		if err != nil {
+			return nil, err
+		}
+
+		return &wire.TxOut{
+			Value:    int64(amt),
+			PkScript: pkScript,
+		}, nil
+
+	case *btgChain.BgolddClient:
 		txout, err := backend.GetTxOut(&op.Hash, op.Index, false)
 		if err != nil {
 			return nil, err

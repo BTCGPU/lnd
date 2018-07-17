@@ -8,9 +8,9 @@ import (
 	"io"
 	"time"
 
-	"github.com/boltdb/bolt"
-	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/coreos/bbolt"
 	"github.com/roasbeef/btcd/wire"
+	"github.com/shelvenzhou/lnd/lnwire"
 )
 
 var (
@@ -45,7 +45,7 @@ const (
 	// within the database along side incoming/outgoing invoices.
 	MaxReceiptSize = 1024
 
-	// MaxPaymentRequestSize is the max size of a a payment request for
+	// MaxPaymentRequestSize is the max size of a payment request for
 	// this invoice.
 	// TODO(halseth): determine the max length payment request when field
 	// lengths are final.
@@ -430,6 +430,12 @@ func settleInvoice(invoices *bolt.Bucket, invoiceNum []byte) error {
 	invoice, err := fetchInvoice(invoiceNum, invoices)
 	if err != nil {
 		return err
+	}
+
+	// Add idempotency to duplicate settles, return here to avoid
+	// overwriting the previous info.
+	if invoice.Terms.Settled {
+		return nil
 	}
 
 	invoice.Terms.Settled = true

@@ -4,8 +4,8 @@ import (
 	"net"
 	"sync"
 
-	"github.com/lightningnetwork/lnd/channeldb"
-	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/shelvenzhou/lnd/channeldb"
+	"github.com/shelvenzhou/lnd/lnwire"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcd/wire"
@@ -58,8 +58,8 @@ type InputScript struct {
 }
 
 // ChannelReservation represents an intent to open a lightning payment channel
-// a counterparty. The funding processes from reservation to channel opening is
-// a 3-step process. In order to allow for full concurrency during the
+// with a counterparty. The funding processes from reservation to channel opening
+// is a 3-step process. In order to allow for full concurrency during the
 // reservation workflow, resources consumed by a contribution are "locked"
 // themselves. This prevents a number of race conditions such as two funding
 // transactions double-spending the same input. A reservation can also be
@@ -69,12 +69,12 @@ type InputScript struct {
 // The reservation workflow consists of the following three steps:
 //  1. lnwallet.InitChannelReservation
 //     * One requests the wallet to allocate the necessary resources for a
-//      channel reservation. These resources a put in limbo for the lifetime
-//      of a reservation.
-//    * Once completed the reservation will have the wallet's contribution
-//      accessible via the .OurContribution() method. This contribution
-//      contains the necessary items to allow the remote party to build both
-//      the funding, and commitment transactions.
+//       channel reservation. These resources are put in limbo for the lifetime
+//       of a reservation.
+//     * Once completed the reservation will have the wallet's contribution
+//       accessible via the .OurContribution() method. This contribution
+//       contains the necessary items to allow the remote party to build both
+//       the funding, and commitment transactions.
 //  2. ChannelReservation.ProcessContribution/ChannelReservation.ProcessSingleContribution
 //     * The counterparty presents their contribution to the payment channel.
 //       This allows us to build the funding, and commitment transactions
@@ -276,16 +276,6 @@ func (r *ChannelReservation) SetNumConfsRequired(numConfs uint16) {
 	r.partialState.NumConfsRequired = numConfs
 }
 
-// RegisterMinHTLC registers our desired amount for the smallest acceptable
-// HTLC we'll accept within this channel. Any HTLC's that are extended which
-// are below this value will SHOULD be rejected.
-func (r *ChannelReservation) RegisterMinHTLC(minHTLC lnwire.MilliSatoshi) {
-	r.Lock()
-	defer r.Unlock()
-
-	r.ourContribution.MinHTLC = minHTLC
-}
-
 // CommitConstraints takes the constraints that the remote party specifies for
 // the type of commitments that we can generate for them. These constraints
 // include several parameters that serve as flow control restricting the amount
@@ -294,7 +284,7 @@ func (r *ChannelReservation) RegisterMinHTLC(minHTLC lnwire.MilliSatoshi) {
 // if the parameters are seemed unsound.
 func (r *ChannelReservation) CommitConstraints(csvDelay, maxHtlcs uint16,
 	maxValueInFlight, minHtlc lnwire.MilliSatoshi,
-	chanReserve btcutil.Amount) error {
+	chanReserve, dustLimit btcutil.Amount) error {
 
 	r.Lock()
 	defer r.Unlock()
@@ -304,6 +294,12 @@ func (r *ChannelReservation) CommitConstraints(csvDelay, maxHtlcs uint16,
 	const maxDelay = 10000
 	if csvDelay > maxDelay {
 		return ErrCsvDelayTooLarge(csvDelay, maxDelay)
+	}
+
+	// The dust limit should always be greater or equal to the channel
+	// reserve. The reservation request should be denied if otherwise.
+	if dustLimit > chanReserve {
+		return ErrChanReserveTooSmall(chanReserve, dustLimit)
 	}
 
 	// Fail if we consider the channel reserve to be too large.  We
@@ -339,6 +335,12 @@ func (r *ChannelReservation) CommitConstraints(csvDelay, maxHtlcs uint16,
 	if maxValueInFlight < minNumHtlc*minHtlc {
 		return ErrMaxValueInFlightTooSmall(maxValueInFlight,
 			minNumHtlc*minHtlc)
+	}
+
+	// Our dust limit should always be less than or equal our proposed
+	// channel reserve.
+	if r.ourContribution.DustLimit > chanReserve {
+		r.ourContribution.DustLimit = chanReserve
 	}
 
 	r.ourContribution.ChannelConfig.CsvDelay = csvDelay

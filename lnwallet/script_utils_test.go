@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lightningnetwork/lnd/keychain"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcd/txscript"
 	"github.com/roasbeef/btcd/wire"
 	"github.com/roasbeef/btcutil"
+	"github.com/shelvenzhou/lnd/keychain"
 )
 
 // TestCommitmentSpendValidation test the spendability of both outputs within
@@ -175,7 +175,7 @@ func TestCommitmentSpendValidation(t *testing.T) {
 	}
 
 	// In order to test the final scenario, we modify the TxIn of the sweep
-	// transaction to instead point to to the regular output (non delay)
+	// transaction to instead point to the regular output (non delay)
 	// within the commitment transaction.
 	sweepTx.TxIn[0] = &wire.TxIn{
 		PreviousOutPoint: wire.OutPoint{

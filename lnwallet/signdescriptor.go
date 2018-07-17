@@ -5,10 +5,10 @@ import (
 	"errors"
 	"io"
 
-	"github.com/lightningnetwork/lnd/keychain"
 	"github.com/roasbeef/btcd/btcec"
-	"github.com/roasbeef/btcd/txscript"
 	"github.com/roasbeef/btcd/wire"
+	"github.com/shelvenzhou/btgd/txscript"
+	"github.com/shelvenzhou/lnd/keychain"
 )
 
 var (

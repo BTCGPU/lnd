@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/shelvenzhou/lnd/lnwire"
 )
 
 // TestWaitingQueueThreadSafety test the thread safety properties of the

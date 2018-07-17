@@ -42,7 +42,7 @@ type CfFilteredChainView struct {
 
 	// chainFilter is the
 	filterMtx   sync.RWMutex
-	chainFilter map[wire.OutPoint]struct{}
+	chainFilter map[wire.OutPoint][]byte
 
 	quit chan struct{}
 	wg   sync.WaitGroup
@@ -55,14 +55,14 @@ var _ FilteredChainView = (*CfFilteredChainView)(nil)
 // NewCfFilteredChainView creates a new instance of the CfFilteredChainView
 // which is connected to an active neutrino node.
 //
-// NOTE: The node should already be running an syncing before being passed into
+// NOTE: The node should already be running and syncing before being passed into
 // this function.
 func NewCfFilteredChainView(node *neutrino.ChainService) (*CfFilteredChainView, error) {
 	return &CfFilteredChainView{
 		blockQueue:    newBlockEventQueue(),
 		quit:          make(chan struct{}),
 		rescanErrChan: make(chan error),
-		chainFilter:   make(map[wire.OutPoint]struct{}),
+		chainFilter:   make(map[wire.OutPoint][]byte),
 		p2pNode:       node,
 	}, nil
 }
@@ -93,7 +93,7 @@ func (c *CfFilteredChainView) Start() error {
 	}
 
 	// Next, we'll create our set of rescan options. Currently it's
-	// required that a user MUST set a addr/outpoint/txid when creating a
+	// required that an user MUST set a addr/outpoint/txid when creating a
 	// rescan. To get around this, we'll add a "zero" outpoint, that won't
 	// actually be matched.
 	var zeroPoint wire.OutPoint
@@ -241,14 +241,17 @@ func (c *CfFilteredChainView) FilterBlock(blockHash *chainhash.Hash) (*FilteredB
 		return nil, err
 	}
 
+	if filter == nil {
+		return nil, fmt.Errorf("Unable to fetch filter")
+	}
+
 	// Before we can match the filter, we'll need to map each item in our
 	// chain filter to the representation that included in the compact
 	// filters.
 	c.filterMtx.RLock()
 	relevantPoints := make([][]byte, 0, len(c.chainFilter))
-	for op := range c.chainFilter {
-		opBytes := builder.OutPointToFilterEntry(op)
-		relevantPoints = append(relevantPoints, opBytes)
+	for _, filterEntry := range c.chainFilter {
+		relevantPoints = append(relevantPoints, filterEntry)
 	}
 	c.filterMtx.RUnlock()
 
@@ -320,7 +323,7 @@ func (c *CfFilteredChainView) UpdateFilter(ops []wire.OutPoint,
 	// UTXO's, ignoring duplicates in the process.
 	c.filterMtx.Lock()
 	for _, op := range ops {
-		c.chainFilter[op] = struct{}{}
+		c.chainFilter[op] = builder.OutPointToFilterEntry(op)
 	}
 	c.filterMtx.Unlock()
 

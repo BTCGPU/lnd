@@ -20,10 +20,10 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-errors/errors"
-	"github.com/lightningnetwork/lnd/chainntnfs"
-	"github.com/lightningnetwork/lnd/channeldb"
-	"github.com/lightningnetwork/lnd/lnwire"
-	"github.com/lightningnetwork/lnd/routing"
+	"github.com/shelvenzhou/lnd/chainntnfs"
+	"github.com/shelvenzhou/lnd/channeldb"
+	"github.com/shelvenzhou/lnd/lnwire"
+	"github.com/shelvenzhou/lnd/routing"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcd/wire"
@@ -261,7 +261,8 @@ func (m *mockNotifier) RegisterConfirmationsNtfn(txid *chainhash.Hash,
 	return nil, nil
 }
 
-func (m *mockNotifier) RegisterSpendNtfn(outpoint *wire.OutPoint, _ uint32) (*chainntnfs.SpendEvent, error) {
+func (m *mockNotifier) RegisterSpendNtfn(outpoint *wire.OutPoint, _ uint32,
+	_ bool) (*chainntnfs.SpendEvent, error) {
 	return nil, nil
 }
 
@@ -582,7 +583,7 @@ func TestProcessAnnouncement(t *testing.T) {
 		}
 	}
 
-	// Create node valid, signed announcement, process it with with
+	// Create node valid, signed announcement, process it with 
 	// gossiper service, check that valid announcement have been
 	// propagated farther into the lightning network, and check that we
 	// added new node into router.

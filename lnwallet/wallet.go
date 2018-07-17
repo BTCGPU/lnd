@@ -9,19 +9,20 @@ import (
 	"sync/atomic"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/lightningnetwork/lnd/channeldb"
-	"github.com/lightningnetwork/lnd/keychain"
-	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/roasbeef/btcd/blockchain"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcutil/hdkeychain"
+	"github.com/shelvenzhou/lnd/channeldb"
+	"github.com/shelvenzhou/lnd/keychain"
+	"github.com/shelvenzhou/lnd/lnwire"
 
-	"github.com/lightningnetwork/lnd/shachain"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/txscript"
 	"github.com/roasbeef/btcd/wire"
 	"github.com/roasbeef/btcutil"
 	"github.com/roasbeef/btcutil/txsort"
+	btgTxscript "github.com/shelvenzhou/btgd/txscript"
+	"github.com/shelvenzhou/lnd/shachain"
 )
 
 const (
@@ -52,9 +53,8 @@ func (e *ErrInsufficientFunds) Error() string {
 // will be created in order to track the lifetime of this pending channel.
 // Outputs selected will be 'locked', making them unavailable, for any other
 // pending reservations. Therefore, all channels in reservation limbo will be
-// periodically after a timeout period in order to avoid "exhaustion" attacks.
-//
-// TODO(roasbeef): zombie reservation sweeper goroutine.
+// periodically timed out after an idle period in order to avoid "exhaustion"
+// attacks.
 type initFundingReserveMsg struct {
 	// chainHash denotes that chain to be used to ultimately open the
 	// target channel.
@@ -261,8 +261,6 @@ type LightningWallet struct {
 	fundingLimbo  map[uint64]*ChannelReservation
 	nextFundingID uint64
 	limboMtx      sync.RWMutex
-	// TODO(roasbeef): zombie garbage collection routine to solve
-	// lost-object/starvation problem/attack.
 
 	// lockedOutPoints is a set of the currently locked outpoint. This
 	// information is kept in order to provide an easy way to unlock all
@@ -366,7 +364,7 @@ func (l *LightningWallet) ActiveReservations() []*ChannelReservation {
 }
 
 // requestHandler is the primary goroutine(s) responsible for handling, and
-// dispatching relies to all messages.
+// dispatching replies to all messages.
 func (l *LightningWallet) requestHandler() {
 out:
 	for {
@@ -403,14 +401,14 @@ out:
 // successful, a ChannelReservation containing our completed contribution is
 // returned. Our contribution contains all the items necessary to allow the
 // counterparty to build the funding transaction, and both versions of the
-// commitment transaction. Otherwise, an error occurred a nil pointer along with
-// an error are returned.
+// commitment transaction. Otherwise, an error occurred and a nil pointer along
+// with an error are returned.
 //
 // Once a ChannelReservation has been obtained, two additional steps must be
 // processed before a payment channel can be considered 'open'. The second step
 // validates, and processes the counterparty's channel contribution. The third,
 // and final step verifies all signatures for the inputs of the funding
-// transaction, and that the signature we records for our version of the
+// transaction, and that the signature we record for our version of the
 // commitment transaction is valid.
 func (l *LightningWallet) InitChannelReservation(
 	capacity, ourFundAmt btcutil.Amount, pushMSat lnwire.MilliSatoshi,
@@ -579,7 +577,7 @@ func (l *LightningWallet) handleFundingReserveRequest(req *initFundingReserveMsg
 	reservation.partialState.RevocationProducer = producer
 	reservation.ourContribution.ChannelConstraints = l.Cfg.DefaultConstraints
 
-	// TODO(roasbeef): turn above into: initContributio()
+	// TODO(roasbeef): turn above into: initContribution()
 
 	// Create a limbo and record entry for this newly pending funding
 	// request.
@@ -688,7 +686,7 @@ func (l *LightningWallet) handleContributionMsg(req *addContributionMsg) {
 		return
 	}
 
-	// Grab the mutex on the ChannelReservation to ensure thead-safety
+	// Grab the mutex on the ChannelReservation to ensure thread-safety
 	pendingReservation.Lock()
 	defer pendingReservation.Unlock()
 
@@ -742,8 +740,8 @@ func (l *LightningWallet) handleContributionMsg(req *addContributionMsg) {
 	pendingReservation.ourFundingInputScripts = make([]*InputScript, 0,
 		len(ourContribution.Inputs))
 	signDesc := SignDescriptor{
-		HashType:  txscript.SigHashAll,
-		SigHashes: txscript.NewTxSigHashes(fundingTx),
+		HashType:  btgTxscript.SigHashAll | btgTxscript.SigHashForkID,
+		SigHashes: btgTxscript.NewTxSigHashes(fundingTx),
 	}
 	for i, txIn := range fundingTx.TxIn {
 		info, err := l.FetchInputInfo(&txIn.PreviousOutPoint)
@@ -871,8 +869,8 @@ func (l *LightningWallet) handleContributionMsg(req *addContributionMsg) {
 		WitnessScript: witnessScript,
 		KeyDesc:       ourKey,
 		Output:        multiSigOut,
-		HashType:      txscript.SigHashAll,
-		SigHashes:     txscript.NewTxSigHashes(theirCommitTx),
+		HashType:      btgTxscript.SigHashAll | btgTxscript.SigHashForkID,
+		SigHashes:     btgTxscript.NewTxSigHashes(theirCommitTx),
 		InputIndex:    0,
 	}
 	sigTheirCommit, err := l.Cfg.Signer.SignOutputRaw(theirCommitTx, &signDesc)
@@ -963,7 +961,7 @@ func (l *LightningWallet) handleFundingCounterPartySigs(msg *addCounterPartySigs
 	inputScripts := msg.theirFundingInputScripts
 	fundingTx := res.fundingTx
 	sigIndex := 0
-	fundingHashCache := txscript.NewTxSigHashes(fundingTx)
+	fundingHashCache := btgTxscript.NewTxSigHashes(fundingTx)
 	for i, txin := range fundingTx.TxIn {
 		if len(inputScripts) != 0 && len(txin.Witness) == 0 {
 			// Attach the input scripts so we can verify it below.
@@ -982,8 +980,8 @@ func (l *LightningWallet) handleFundingCounterPartySigs(msg *addCounterPartySigs
 			}
 
 			// Ensure that the witness+sigScript combo is valid.
-			vm, err := txscript.NewEngine(output.PkScript,
-				fundingTx, i, txscript.StandardVerifyFlags, nil,
+			vm, err := btgTxscript.NewEngine(output.PkScript,
+				fundingTx, i, btgTxscript.StandardVerifyFlags, nil,
 				fundingHashCache, output.Value)
 			if err != nil {
 				msg.err <- fmt.Errorf("cannot create script "+
@@ -1026,9 +1024,9 @@ func (l *LightningWallet) handleFundingCounterPartySigs(msg *addCounterPartySigs
 	// Next, create the spending scriptSig, and then verify that the script
 	// is complete, allowing us to spend from the funding transaction.
 	channelValue := int64(res.partialState.Capacity)
-	hashCache := txscript.NewTxSigHashes(commitTx)
-	sigHash, err := txscript.CalcWitnessSigHash(witnessScript, hashCache,
-		txscript.SigHashAll, commitTx, 0, channelValue)
+	hashCache := btgTxscript.NewTxSigHashes(commitTx)
+	sigHash, err := btgTxscript.CalcWitnessSigHash(witnessScript, hashCache,
+		btgTxscript.SigHashAll|btgTxscript.SigHashForkID, commitTx, 0, channelValue)
 	if err != nil {
 		msg.err <- err
 		msg.completeChan <- nil
@@ -1073,10 +1071,12 @@ func (l *LightningWallet) handleFundingCounterPartySigs(msg *addCounterPartySigs
 	res.partialState.LocalChanCfg = res.ourContribution.toChanConfig()
 	res.partialState.RemoteChanCfg = res.theirContribution.toChanConfig()
 
+	// We'll also record the finalized funding txn, which will allow us to
+	// rebroadcast on startup in case we fail.
+	res.partialState.FundingTxn = fundingTx
+
 	// Add the complete funding transaction to the DB, in its open bucket
 	// which will be used for the lifetime of this channel.
-	// TODO(roasbeef):
-	//  * attempt to retransmit funding transactions on re-start
 	nodeAddr := res.nodeAddr
 	err = res.partialState.SyncPending(nodeAddr, uint32(bestHeight))
 	if err != nil {
@@ -1169,7 +1169,7 @@ func (l *LightningWallet) handleSingleFunderSigs(req *addSingleFunderSigsMsg) {
 		req.fundingOutpoint, spew.Sdump(theirCommitTx))
 
 	channelValue := int64(pendingReservation.partialState.Capacity)
-	hashCache := txscript.NewTxSigHashes(ourCommitTx)
+	hashCache := btgTxscript.NewTxSigHashes(ourCommitTx)
 	theirKey := pendingReservation.theirContribution.MultiSigKey
 	ourKey := pendingReservation.ourContribution.MultiSigKey
 	witnessScript, _, err := GenFundingPkScript(
@@ -1182,8 +1182,8 @@ func (l *LightningWallet) handleSingleFunderSigs(req *addSingleFunderSigsMsg) {
 		return
 	}
 
-	sigHash, err := txscript.CalcWitnessSigHash(witnessScript, hashCache,
-		txscript.SigHashAll, ourCommitTx, 0, channelValue)
+	sigHash, err := btgTxscript.CalcWitnessSigHash(witnessScript, hashCache,
+		btgTxscript.SigHashAll|btgTxscript.SigHashForkID, ourCommitTx, 0, channelValue)
 	if err != nil {
 		req.err <- err
 		req.completeChan <- nil
@@ -1221,8 +1221,8 @@ func (l *LightningWallet) handleSingleFunderSigs(req *addSingleFunderSigsMsg) {
 			PkScript: p2wsh,
 			Value:    channelValue,
 		},
-		HashType:   txscript.SigHashAll,
-		SigHashes:  txscript.NewTxSigHashes(theirCommitTx),
+		HashType:   btgTxscript.SigHashAll | btgTxscript.SigHashForkID,
+		SigHashes:  btgTxscript.NewTxSigHashes(theirCommitTx),
 		InputIndex: 0,
 	}
 	sigTheirCommit, err := l.Cfg.Signer.SignOutputRaw(theirCommitTx, &signDesc)
@@ -1367,7 +1367,7 @@ func initStateHints(commit1, commit2 *wire.MsgTx,
 }
 
 // selectInputs selects a slice of inputs necessary to meet the specified
-// selection amount. If input selection is unable to succeed to to insufficient
+// selection amount. If input selection is unable to succeed due to insufficient
 // funds, a non-nil error is returned. Additionally, the total amount of the
 // selected coins are returned in order for the caller to properly handle
 // change+fees.

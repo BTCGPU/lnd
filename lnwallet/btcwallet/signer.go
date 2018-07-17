@@ -2,16 +2,17 @@ package btcwallet
 
 import (
 	"github.com/go-errors/errors"
-	"github.com/lightningnetwork/lnd/keychain"
-	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcd/txscript"
 	"github.com/roasbeef/btcd/wire"
 	"github.com/roasbeef/btcutil"
 	"github.com/roasbeef/btcwallet/waddrmgr"
-	base "github.com/roasbeef/btcwallet/wallet"
 	"github.com/roasbeef/btcwallet/walletdb"
+	btgTxscript "github.com/shelvenzhou/btgd/txscript"
+	base "github.com/shelvenzhou/btgwallet/wallet"
+	"github.com/shelvenzhou/lnd/keychain"
+	"github.com/shelvenzhou/lnd/lnwallet"
 )
 
 // FetchInputInfo queries for the WalletController's knowledge of the passed
@@ -83,7 +84,7 @@ func (b *BtcWallet) fetchPrivKey(keyDesc *keychain.KeyDescriptor) (*btcec.Privat
 	if !keyDesc.KeyLocator.IsEmpty() {
 		// We'll assume the special lightning key scope in this case.
 		scopedMgr, err := b.wallet.Manager.FetchScopedKeyManager(
-			lightningKeyScope,
+			b.chainKeyScope,
 		)
 		if err != nil {
 			return nil, err
@@ -173,7 +174,7 @@ func (b *BtcWallet) SignOutputRaw(tx *wire.MsgTx,
 	// TODO(roasbeef): generate sighash midstate if not present?
 
 	amt := signDesc.Output.Value
-	sig, err := txscript.RawTxInWitnessSignature(tx, signDesc.SigHashes,
+	sig, err := btgTxscript.RawTxInWitnessSignature(tx, signDesc.SigHashes,
 		signDesc.InputIndex, amt, witnessScript, signDesc.HashType,
 		privKey)
 	if err != nil {
@@ -258,7 +259,7 @@ func (b *BtcWallet) ComputeInputScript(tx *wire.MsgTx,
 
 	// Generate a valid witness stack for the input.
 	// TODO(roasbeef): adhere to passed HashType
-	witnessScript, err := txscript.WitnessSignature(tx, signDesc.SigHashes,
+	witnessScript, err := btgTxscript.WitnessSignature(tx, signDesc.SigHashes,
 		signDesc.InputIndex, signDesc.Output.Value, witnessProgram,
 		signDesc.HashType, privKey, true)
 	if err != nil {

@@ -11,15 +11,16 @@ import (
 	"github.com/btcsuite/btclog"
 	"github.com/jrick/logrotate/rotator"
 	"github.com/lightninglabs/neutrino"
-	"github.com/lightningnetwork/lnd/autopilot"
-	"github.com/lightningnetwork/lnd/chainntnfs"
-	"github.com/lightningnetwork/lnd/channeldb"
-	"github.com/lightningnetwork/lnd/contractcourt"
-	"github.com/lightningnetwork/lnd/discovery"
-	"github.com/lightningnetwork/lnd/htlcswitch"
-	"github.com/lightningnetwork/lnd/lnwallet"
-	"github.com/lightningnetwork/lnd/routing"
+	"github.com/lightningnetwork/lightning-onion"
 	"github.com/roasbeef/btcd/connmgr"
+	"github.com/shelvenzhou/lnd/autopilot"
+	"github.com/shelvenzhou/lnd/chainntnfs"
+	"github.com/shelvenzhou/lnd/channeldb"
+	"github.com/shelvenzhou/lnd/contractcourt"
+	"github.com/shelvenzhou/lnd/discovery"
+	"github.com/shelvenzhou/lnd/htlcswitch"
+	"github.com/shelvenzhou/lnd/lnwallet"
+	"github.com/shelvenzhou/lnd/routing"
 )
 
 // logWriter implements an io.Writer that outputs to both standard output and
@@ -72,6 +73,7 @@ var (
 	btcnLog = backendLog.Logger("BTCN")
 	atplLog = backendLog.Logger("ATPL")
 	cnctLog = backendLog.Logger("CNCT")
+	sphxLog = backendLog.Logger("SPHX")
 )
 
 // Initialize package-global logger variables.
@@ -86,6 +88,7 @@ func init() {
 	neutrino.UseLogger(btcnLog)
 	autopilot.UseLogger(atplLog)
 	contractcourt.UseLogger(cnctLog)
+	sphinx.UseLogger(sphxLog)
 }
 
 // subsystemLoggers maps each subsystem identifier to its associated logger.
@@ -107,19 +110,20 @@ var subsystemLoggers = map[string]btclog.Logger{
 	"BTCN": btcnLog,
 	"ATPL": atplLog,
 	"CNCT": cnctLog,
+	"SPHX": sphxLog,
 }
 
 // initLogRotator initializes the logging rotator to write logs to logFile and
 // create roll files in the same directory.  It must be called before the
 // package-global log rotator variables are used.
-func initLogRotator(logFile string) {
+func initLogRotator(logFile string, MaxLogFileSize int, MaxLogFiles int) {
 	logDir, _ := filepath.Split(logFile)
 	err := os.MkdirAll(logDir, 0700)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create log directory: %v\n", err)
 		os.Exit(1)
 	}
-	r, err := rotator.New(logFile, 10*1024, false, 3)
+	r, err := rotator.New(logFile, int64(MaxLogFileSize*1024), false, MaxLogFiles)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create file rotator: %v\n", err)
 		os.Exit(1)

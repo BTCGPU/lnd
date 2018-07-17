@@ -13,6 +13,7 @@ import (
 	"github.com/roasbeef/btcd/txscript"
 	"github.com/roasbeef/btcd/wire"
 	"github.com/roasbeef/btcutil"
+	btgTxscript "github.com/shelvenzhou/btgd/txscript"
 )
 
 var (
@@ -367,7 +368,7 @@ func senderHtlcSpendTimeout(receiverSig []byte, signer Signer,
 	// original OP_CHECKMULTISIG.
 	witnessStack := wire.TxWitness(make([][]byte, 5))
 	witnessStack[0] = nil
-	witnessStack[1] = append(receiverSig, byte(txscript.SigHashAll))
+	witnessStack[1] = append(receiverSig, byte(btgTxscript.SigHashAll|btgTxscript.SigHashForkID))
 	witnessStack[2] = append(sweepSig, byte(signDesc.HashType))
 	witnessStack[3] = nil
 	witnessStack[4] = signDesc.WitnessScript
@@ -522,7 +523,7 @@ func receiverHtlcSpendRedeem(senderSig, paymentPreimage []byte,
 	// order to consume the extra pop within OP_CHECKMULTISIG.
 	witnessStack := wire.TxWitness(make([][]byte, 5))
 	witnessStack[0] = nil
-	witnessStack[1] = append(senderSig, byte(txscript.SigHashAll))
+	witnessStack[1] = append(senderSig, byte(btgTxscript.SigHashAll|btgTxscript.SigHashForkID))
 	witnessStack[2] = append(sweepSig, byte(signDesc.HashType))
 	witnessStack[3] = paymentPreimage
 	witnessStack[4] = signDesc.WitnessScript
@@ -726,7 +727,7 @@ func createHtlcSuccessTx(htlcOutput wire.OutPoint, htlcAmt btcutil.Amount,
 
 // secondLevelHtlcScript is the uniform script that's used as the output for
 // the second-level HTLC transactions. The second level transaction act as a
-// sort of covenant, ensuring that an 2-of-2 multi-sig output can only be
+// sort of covenant, ensuring that a 2-of-2 multi-sig output can only be
 // spent in a particular way, and to a particular output.
 //
 // Possible Input Scripts:
@@ -807,9 +808,9 @@ func htlcSpendSuccess(signer Signer, signDesc *SignDescriptor,
 
 	// As we mutated the transaction, we'll re-calculate the sighashes for
 	// this instance.
-	signDesc.SigHashes = txscript.NewTxSigHashes(sweepTx)
+	signDesc.SigHashes = btgTxscript.NewTxSigHashes(sweepTx)
 
-	// With the proper sequence an version set, we'll now sign the timeout
+	// With the proper sequence and version set, we'll now sign the timeout
 	// transaction using the passed signed descriptor. In order to generate
 	// a valid signature, then signDesc should be using the base delay
 	// public key, and the proper single tweak bytes.
@@ -865,7 +866,7 @@ func htlcSpendRevoke(signer Signer, signDesc *SignDescriptor,
 func HtlcSecondLevelSpend(signer Signer, signDesc *SignDescriptor,
 	sweepTx *wire.MsgTx) (wire.TxWitness, error) {
 
-	// With the proper sequence an version set, we'll now sign the timeout
+	// With the proper sequence and version set, we'll now sign the timeout
 	// transaction using the passed signed descriptor. In order to generate
 	// a valid signature, then signDesc should be using the base delay
 	// public key, and the proper single tweak bytes.
@@ -878,7 +879,7 @@ func HtlcSecondLevelSpend(signer Signer, signDesc *SignDescriptor,
 	// witness script), in order to force execution to the second portion
 	// of the if clause.
 	witnessStack := wire.TxWitness(make([][]byte, 3))
-	witnessStack[0] = append(sweepSig, byte(txscript.SigHashAll))
+	witnessStack[0] = append(sweepSig, byte(btgTxscript.SigHashAll|btgTxscript.SigHashForkID))
 	witnessStack[1] = nil
 	witnessStack[2] = signDesc.WitnessScript
 
@@ -1246,7 +1247,7 @@ func DeriveRevocationPrivKey(revokeBasePriv *btcec.PrivateKey,
 func SetStateNumHint(commitTx *wire.MsgTx, stateNum uint64,
 	obfuscator [StateHintSize]byte) error {
 
-	// With the current schema we are only able able to encode state num
+	// With the current schema we are only able to encode state num
 	// hints up to 2^48. Therefore if the passed height is greater than our
 	// state hint ceiling, then exit early.
 	if stateNum > maxStateHint {

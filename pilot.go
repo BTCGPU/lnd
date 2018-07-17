@@ -5,8 +5,8 @@ import (
 	"net"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/lightningnetwork/lnd/autopilot"
-	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/shelvenzhou/lnd/autopilot"
+	"github.com/shelvenzhou/lnd/lnwire"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/wire"
 	"github.com/roasbeef/btcutil"
@@ -94,10 +94,22 @@ func (c *chanController) OpenChannel(target *btcec.PublicKey,
 	minHtlc := lnwire.NewMSatFromSatoshis(1)
 
 	updateStream, errChan := c.server.OpenChannel(target, amt, 0,
-		minHtlc, feePerVSize, false)
+		minHtlc, feePerVSize, false, 0)
 
 	select {
 	case err := <-errChan:
+		// If we were not able to actually open a channel to the peer
+		// for whatever reason, then we'll disconnect from the peer to
+		// ensure we don't accumulate a bunch of unnecessary
+		// connections.
+		if err != nil {
+			dcErr := c.server.DisconnectPeer(target)
+			if dcErr != nil {
+				atplLog.Errorf("Unable to disconnect from peer %v",
+					target.SerializeCompressed())
+			}
+		}
+
 		return err
 	case <-updateStream:
 		return nil
@@ -130,11 +142,9 @@ func initAutoPilot(svr *server, cfg *autoPilotConfig) (*autopilot.Agent, error) 
 
 	// First, we'll create the preferential attachment heuristic,
 	// initialized with the passed auto pilot configuration parameters.
-	//
-	// TODO(roasbeef): switch here to dispatch specified heuristic
-	minChanSize := svr.cc.wallet.Cfg.DefaultConstraints.DustLimit * 5
 	prefAttachment := autopilot.NewConstrainedPrefAttachment(
-		minChanSize, maxFundingAmount,
+		btcutil.Amount(cfg.MinChannelSize),
+		btcutil.Amount(cfg.MaxChannelSize),
 		uint16(cfg.MaxChannels), cfg.Allocation,
 	)
 
@@ -148,7 +158,8 @@ func initAutoPilot(svr *server, cfg *autoPilotConfig) (*autopilot.Agent, error) 
 		WalletBalance: func() (btcutil.Amount, error) {
 			return svr.cc.wallet.ConfirmedBalance(1)
 		},
-		Graph: autopilot.ChannelGraphFromDatabase(svr.chanDB.ChannelGraph()),
+		Graph:           autopilot.ChannelGraphFromDatabase(svr.chanDB.ChannelGraph()),
+		MaxPendingOpens: 10,
 	}
 
 	// Next, we'll fetch the current state of open channels from the
@@ -160,7 +171,7 @@ func initAutoPilot(svr *server, cfg *autoPilotConfig) (*autopilot.Agent, error) 
 	initialChanState := make([]autopilot.Channel, len(activeChannels))
 	for i, channel := range activeChannels {
 		initialChanState[i] = autopilot.Channel{
-			ChanID:   channel.ShortChanID,
+			ChanID:   channel.ShortChanID(),
 			Capacity: channel.Capacity,
 			Node:     autopilot.NewNodeID(channel.IdentityPub),
 		}
@@ -265,7 +276,7 @@ func initAutoPilot(svr *server, cfg *autoPilotConfig) (*autopilot.Agent, error) 
 					pilot.OnChannelOpen(edge)
 				}
 
-				// For each closed closed channel, we'll obtain
+				// For each closed channel, we'll obtain
 				// the chanID of the closed channel and send it
 				// to the pilot.
 				for _, chanClose := range topChange.ClosedChannels {

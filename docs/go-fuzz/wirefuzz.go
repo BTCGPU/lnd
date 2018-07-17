@@ -3,7 +3,7 @@ package wirefuzz
 import (
 	"bytes"
 	"fmt"
-	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/shelvenzhou/lnd/lnwire"
 	"reflect"
 )
 

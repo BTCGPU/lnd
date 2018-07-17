@@ -7,9 +7,9 @@ import (
 	"path"
 	"testing"
 
-	"github.com/boltdb/bolt"
+	"github.com/coreos/bbolt"
 
-	"github.com/lightningnetwork/lnd/macaroons"
+	"github.com/shelvenzhou/lnd/macaroons"
 
 	"github.com/roasbeef/btcwallet/snacl"
 )

@@ -4,8 +4,11 @@ package main
 
 import (
 	"bytes"
+	crand "crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"net"
@@ -17,18 +20,17 @@ import (
 
 	"github.com/btcsuite/btclog"
 	"github.com/go-errors/errors"
-	"github.com/lightningnetwork/lnd/channeldb"
-	"github.com/lightningnetwork/lnd/contractcourt"
-	"github.com/lightningnetwork/lnd/htlcswitch"
-	"github.com/lightningnetwork/lnd/keychain"
-	"github.com/lightningnetwork/lnd/lnwallet"
-	"github.com/lightningnetwork/lnd/lnwire"
-	"github.com/lightningnetwork/lnd/shachain"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
 	"github.com/roasbeef/btcd/txscript"
 	"github.com/roasbeef/btcd/wire"
 	"github.com/roasbeef/btcutil"
+	"github.com/shelvenzhou/lnd/channeldb"
+	"github.com/shelvenzhou/lnd/htlcswitch"
+	"github.com/shelvenzhou/lnd/keychain"
+	"github.com/shelvenzhou/lnd/lnwallet"
+	"github.com/shelvenzhou/lnd/lnwire"
+	"github.com/shelvenzhou/lnd/shachain"
 )
 
 var (
@@ -946,18 +948,10 @@ func TestBreachHandoffSuccess(t *testing.T) {
 	defer cleanUpChans()
 
 	// Instantiate a breach arbiter to handle the breach of alice's channel.
-	alicePoint := alice.ChannelPoint()
-	spendEvents := contractcourt.ChainEventSubscription{
-		UnilateralClosure:  make(chan *lnwallet.UnilateralCloseSummary, 1),
-		CooperativeClosure: make(chan struct{}, 1),
-		ContractBreach:     make(chan *lnwallet.BreachRetribution, 1),
-		ProcessACK:         make(chan error, 1),
-		ChanPoint:          *alicePoint,
-		Cancel: func() {
-		},
-	}
+	contractBreaches := make(chan *ContractBreachEvent)
+
 	brar, cleanUpArb, err := createTestArbiter(
-		t, &spendEvents, alice.State().Db,
+		t, contractBreaches, alice.State().Db,
 	)
 	if err != nil {
 		t.Fatalf("unable to initialize test breach arbiter: %v", err)
@@ -967,7 +961,7 @@ func TestBreachHandoffSuccess(t *testing.T) {
 	// Send one HTLC to Bob and perform a state transition to lock it in.
 	htlcAmount := lnwire.NewMSatFromSatoshis(20000)
 	htlc, _ := createHTLC(0, htlcAmount)
-	if _, err := alice.AddHTLC(htlc); err != nil {
+	if _, err := alice.AddHTLC(htlc, nil); err != nil {
 		t.Fatalf("alice unable to add htlc: %v", err)
 	}
 	if _, err := bob.ReceiveHTLC(htlc); err != nil {
@@ -987,7 +981,7 @@ func TestBreachHandoffSuccess(t *testing.T) {
 	// Now send another HTLC and perform a state transition, this ensures
 	// Alice is ahead of the state Bob will broadcast.
 	htlc2, _ := createHTLC(1, htlcAmount)
-	if _, err := alice.AddHTLC(htlc2); err != nil {
+	if _, err := alice.AddHTLC(htlc2, nil); err != nil {
 		t.Fatalf("alice unable to add htlc: %v", err)
 	}
 	if _, err := bob.ReceiveHTLC(htlc2); err != nil {
@@ -1001,13 +995,21 @@ func TestBreachHandoffSuccess(t *testing.T) {
 
 	// Signal a spend of the funding transaction and wait for the close
 	// observer to exit.
-	spendEvents.ContractBreach <- &lnwallet.BreachRetribution{
-		BreachTransaction: bobClose.CloseTx,
+	breach := &ContractBreachEvent{
+		ChanPoint:  *chanPoint,
+		ProcessACK: make(chan error, 1),
+		BreachRetribution: &lnwallet.BreachRetribution{
+			BreachTransaction: bobClose.CloseTx,
+		},
 	}
+	contractBreaches <- breach
 
 	// We'll also wait to consume the ACK back from the breach arbiter.
 	select {
-	case <-spendEvents.ProcessACK:
+	case err := <-breach.ProcessACK:
+		if err != nil {
+			t.Fatalf("handoff failed: %v", err)
+		}
 	case <-time.After(time.Second * 15):
 		t.Fatalf("breach arbiter didn't send ack back")
 	}
@@ -1015,6 +1017,32 @@ func TestBreachHandoffSuccess(t *testing.T) {
 	// After exiting, the breach arbiter should have persisted the
 	// retribution information and the channel should be shown as pending
 	// force closed.
+	assertArbiterBreach(t, brar, chanPoint)
+
+	// Send another breach event. Since the handoff for this channel was
+	// already ACKed, the breach arbiter should immediately ACK and ignore
+	// this event.
+	breach = &ContractBreachEvent{
+		ChanPoint:  *chanPoint,
+		ProcessACK: make(chan error, 1),
+		BreachRetribution: &lnwallet.BreachRetribution{
+			BreachTransaction: bobClose.CloseTx,
+		},
+	}
+
+	contractBreaches <- breach
+
+	// We'll also wait to consume the ACK back from the breach arbiter.
+	select {
+	case err := <-breach.ProcessACK:
+		if err != nil {
+			t.Fatalf("handoff failed: %v", err)
+		}
+	case <-time.After(time.Second * 15):
+		t.Fatalf("breach arbiter didn't send ack back")
+	}
+
+	// State should not have changed.
 	assertArbiterBreach(t, brar, chanPoint)
 }
 
@@ -1034,18 +1062,10 @@ func TestBreachHandoffFail(t *testing.T) {
 	defer cleanUpChans()
 
 	// Instantiate a breach arbiter to handle the breach of alice's channel.
-	alicePoint := alice.ChannelPoint()
-	spendEvents := contractcourt.ChainEventSubscription{
-		UnilateralClosure:  make(chan *lnwallet.UnilateralCloseSummary, 1),
-		CooperativeClosure: make(chan struct{}, 1),
-		ContractBreach:     make(chan *lnwallet.BreachRetribution, 1),
-		ProcessACK:         make(chan error, 1),
-		ChanPoint:          *alicePoint,
-		Cancel: func() {
-		},
-	}
+	contractBreaches := make(chan *ContractBreachEvent)
+
 	brar, cleanUpArb, err := createTestArbiter(
-		t, &spendEvents, alice.State().Db,
+		t, contractBreaches, alice.State().Db,
 	)
 	if err != nil {
 		t.Fatalf("unable to initialize test breach arbiter: %v", err)
@@ -1055,7 +1075,7 @@ func TestBreachHandoffFail(t *testing.T) {
 	// Send one HTLC to Bob and perform a state transition to lock it in.
 	htlcAmount := lnwire.NewMSatFromSatoshis(20000)
 	htlc, _ := createHTLC(0, htlcAmount)
-	if _, err := alice.AddHTLC(htlc); err != nil {
+	if _, err := alice.AddHTLC(htlc, nil); err != nil {
 		t.Fatalf("alice unable to add htlc: %v", err)
 	}
 	if _, err := bob.ReceiveHTLC(htlc); err != nil {
@@ -1075,7 +1095,7 @@ func TestBreachHandoffFail(t *testing.T) {
 	// Now send another HTLC and perform a state transition, this ensures
 	// Alice is ahead of the state Bob will broadcast.
 	htlc2, _ := createHTLC(1, htlcAmount)
-	if _, err := alice.AddHTLC(htlc2); err != nil {
+	if _, err := alice.AddHTLC(htlc2, nil); err != nil {
 		t.Fatalf("alice unable to add htlc: %v", err)
 	}
 	if _, err := bob.ReceiveHTLC(htlc2); err != nil {
@@ -1094,11 +1114,18 @@ func TestBreachHandoffFail(t *testing.T) {
 	// Signal the notifier to dispatch spend notifications of the funding
 	// transaction using the transaction from bob's closing summary.
 	chanPoint := alice.ChanPoint
-	spendEvents.ContractBreach <- &lnwallet.BreachRetribution{
-		BreachTransaction: bobClose.CloseTx,
+	breach := &ContractBreachEvent{
+		ChanPoint:  *chanPoint,
+		ProcessACK: make(chan error, 1),
+		BreachRetribution: &lnwallet.BreachRetribution{
+			BreachTransaction: bobClose.CloseTx,
+		},
 	}
+	contractBreaches <- breach
+
+	// We'll also wait to consume the ACK back from the breach arbiter.
 	select {
-	case err := <-spendEvents.ProcessACK:
+	case err := <-breach.ProcessACK:
 		if err == nil {
 			t.Fatalf("breach write should have failed")
 		}
@@ -1113,7 +1140,7 @@ func TestBreachHandoffFail(t *testing.T) {
 	assertNotPendingClosed(t, alice)
 
 	brar, cleanUpArb, err = createTestArbiter(
-		t, &spendEvents, alice.State().Db,
+		t, contractBreaches, alice.State().Db,
 	)
 	if err != nil {
 		t.Fatalf("unable to initialize test breach arbiter: %v", err)
@@ -1134,11 +1161,21 @@ func TestBreachHandoffFail(t *testing.T) {
 
 	// Signal a spend of the funding transaction and wait for the close
 	// observer to exit. This time we are allowing the handoff to succeed.
-	spendEvents.ContractBreach <- &lnwallet.BreachRetribution{
-		BreachTransaction: bobClose.CloseTx,
+	breach = &ContractBreachEvent{
+		ChanPoint:  *chanPoint,
+		ProcessACK: make(chan error, 1),
+		BreachRetribution: &lnwallet.BreachRetribution{
+			BreachTransaction: bobClose.CloseTx,
+		},
 	}
+
+	contractBreaches <- breach
+
 	select {
-	case <-spendEvents.ProcessACK:
+	case err := <-breach.ProcessACK:
+		if err != nil {
+			t.Fatalf("handoff failed: %v", err)
+		}
 	case <-time.After(time.Second * 15):
 		t.Fatalf("breach arbiter didn't send ack back")
 	}
@@ -1202,7 +1239,7 @@ func assertNotPendingClosed(t *testing.T, c *lnwallet.LightningChannel) {
 
 // createTestArbiter instantiates a breach arbiter with a failing retribution
 // store, so that controlled failures can be tested.
-func createTestArbiter(t *testing.T, chainEvents *contractcourt.ChainEventSubscription,
+func createTestArbiter(t *testing.T, contractBreaches chan *ContractBreachEvent,
 	db *channeldb.DB) (*breachArbiter, func(), error) {
 
 	// Create a failing retribution store, that wraps a normal one.
@@ -1217,13 +1254,11 @@ func createTestArbiter(t *testing.T, chainEvents *contractcourt.ChainEventSubscr
 	// Assemble our test arbiter.
 	notifier := makeMockSpendNotifier()
 	ba := newBreachArbiter(&BreachConfig{
-		CloseLink:      func(_ *wire.OutPoint, _ htlcswitch.ChannelCloseType) {},
-		DB:             db,
-		Estimator:      &lnwallet.StaticFeeEstimator{FeeRate: 50},
-		GenSweepScript: func() ([]byte, error) { return nil, nil },
-		SubscribeChannelEvents: func(_ wire.OutPoint) (*contractcourt.ChainEventSubscription, error) {
-			return chainEvents, nil
-		},
+		CloseLink:          func(_ *wire.OutPoint, _ htlcswitch.ChannelCloseType) {},
+		DB:                 db,
+		Estimator:          &lnwallet.StaticFeeEstimator{FeeRate: 50},
+		GenSweepScript:     func() ([]byte, error) { return nil, nil },
+		ContractBreaches:   contractBreaches,
 		Signer:             signer,
 		Notifier:           notifier,
 		PublishTransaction: func(_ *wire.MsgTx) error { return nil },
@@ -1252,7 +1287,11 @@ func createInitChannels(revocationWindow int) (*lnwallet.LightningChannel, *lnwa
 	bobKeyPriv, bobKeyPub := btcec.PrivKeyFromBytes(btcec.S256(),
 		bobsPrivKey)
 
-	channelCapacity := btcutil.Amount(10 * 1e8)
+	channelCapacity, err := btcutil.NewAmount(10)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	channelBal := channelCapacity / 2
 	aliceDustLimit := btcutil.Amount(200)
 	bobDustLimit := btcutil.Amount(1300)
@@ -1384,11 +1423,21 @@ func createInitChannels(revocationWindow int) (*lnwallet.LightningChannel, *lnwa
 		CommitSig:     bytes.Repeat([]byte{1}, 71),
 	}
 
+	var chanIDBytes [8]byte
+	if _, err := io.ReadFull(crand.Reader, chanIDBytes[:]); err != nil {
+		return nil, nil, nil, err
+	}
+
+	shortChanID := lnwire.NewShortChanIDFromInt(
+		binary.BigEndian.Uint64(chanIDBytes[:]),
+	)
+
 	aliceChannelState := &channeldb.OpenChannel{
 		LocalChanCfg:            aliceCfg,
 		RemoteChanCfg:           bobCfg,
 		IdentityPub:             aliceKeyPub,
 		FundingOutpoint:         *prevOut,
+		ShortChannelID:          shortChanID,
 		ChanType:                channeldb.SingleFunder,
 		IsInitiator:             true,
 		Capacity:                channelCapacity,
@@ -1398,12 +1447,15 @@ func createInitChannels(revocationWindow int) (*lnwallet.LightningChannel, *lnwa
 		LocalCommitment:         aliceCommit,
 		RemoteCommitment:        aliceCommit,
 		Db:                      dbAlice,
+		Packager:                channeldb.NewChannelPackager(shortChanID),
+		FundingTxn:              testTx,
 	}
 	bobChannelState := &channeldb.OpenChannel{
 		LocalChanCfg:            bobCfg,
 		RemoteChanCfg:           aliceCfg,
 		IdentityPub:             bobKeyPub,
 		FundingOutpoint:         *prevOut,
+		ShortChannelID:          shortChanID,
 		ChanType:                channeldb.SingleFunder,
 		IsInitiator:             false,
 		Capacity:                channelCapacity,
@@ -1413,6 +1465,7 @@ func createInitChannels(revocationWindow int) (*lnwallet.LightningChannel, *lnwa
 		LocalCommitment:         bobCommit,
 		RemoteCommitment:        bobCommit,
 		Db:                      dbBob,
+		Packager:                channeldb.NewChannelPackager(shortChanID),
 	}
 
 	pCache := &mockPreimageCache{
@@ -1540,7 +1593,7 @@ func forceStateTransition(chanA, chanB *lnwallet.LightningChannel) error {
 		return err
 	}
 
-	if _, err := chanA.ReceiveRevocation(bobRevocation); err != nil {
+	if _, _, _, err := chanA.ReceiveRevocation(bobRevocation); err != nil {
 		return err
 	}
 	if err := chanA.ReceiveNewCommitment(bobSig, bobHtlcSigs); err != nil {
@@ -1551,7 +1604,7 @@ func forceStateTransition(chanA, chanB *lnwallet.LightningChannel) error {
 	if err != nil {
 		return err
 	}
-	if _, err := chanB.ReceiveRevocation(aliceRevocation); err != nil {
+	if _, _, _, err := chanB.ReceiveRevocation(aliceRevocation); err != nil {
 		return err
 	}
 

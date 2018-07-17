@@ -9,8 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lightningnetwork/lnd/keychain"
-	"github.com/lightningnetwork/lnd/lnwallet"
 	"github.com/roasbeef/btcd/btcec"
 	"github.com/roasbeef/btcd/chaincfg"
 	"github.com/roasbeef/btcd/chaincfg/chainhash"
@@ -19,8 +17,11 @@ import (
 	"github.com/roasbeef/btcutil"
 	"github.com/roasbeef/btcwallet/chain"
 	"github.com/roasbeef/btcwallet/waddrmgr"
-	base "github.com/roasbeef/btcwallet/wallet"
 	"github.com/roasbeef/btcwallet/walletdb"
+	btgChain "github.com/shelvenzhou/btgwallet/chain"
+	base "github.com/shelvenzhou/btgwallet/wallet"
+	"github.com/shelvenzhou/lnd/keychain"
+	"github.com/shelvenzhou/lnd/lnwallet"
 )
 
 const (
@@ -31,14 +32,6 @@ var (
 	// waddrmgrNamespaceKey is the namespace key that the waddrmgr state is
 	// stored within the top-level waleltdb buckets of btcwallet.
 	waddrmgrNamespaceKey = []byte("waddrmgr")
-
-	// lightningKeyScope is the key scope that will be used within the
-	// waddrmgr to create an HD chain for deriving all of our required
-	// keys. We'll ensure this this scope is created upon start.
-	lightningKeyScope = waddrmgr.KeyScope{
-		Purpose: keychain.BIP0043Purpose,
-		Coin:    0,
-	}
 
 	// lightningAddrSchema is the scope addr schema for all keys that we
 	// derive. We'll treat them all as p2wkh addresses, as atm we must
@@ -65,6 +58,8 @@ type BtcWallet struct {
 
 	netParams *chaincfg.Params
 
+	chainKeyScope waddrmgr.KeyScope
+
 	// utxoCache is a cache used to speed up repeated calls to
 	// FetchInputInfo.
 	utxoCache map[wire.OutPoint]*wire.TxOut
@@ -81,6 +76,12 @@ func New(cfg Config) (*BtcWallet, error) {
 	// Ensure the wallet exists or create it when the create flag is set.
 	netDir := NetworkDir(cfg.DataDir, cfg.NetParams)
 
+	// Create the key scope for the coin type being managed by this wallet.
+	chainKeyScope := waddrmgr.KeyScope{
+		Purpose: keychain.BIP0043Purpose,
+		Coin:    cfg.CoinType,
+	}
+
 	var pubPass []byte
 	if cfg.PublicPass == nil {
 		pubPass = defaultPubPassphrase
@@ -88,7 +89,7 @@ func New(cfg Config) (*BtcWallet, error) {
 		pubPass = cfg.PublicPass
 	}
 
-	loader := base.NewLoader(cfg.NetParams, netDir)
+	loader := base.NewLoader(cfg.NetParams, netDir, cfg.RecoveryWindow)
 	walletExists, err := loader.WalletExists()
 	if err != nil {
 		return nil, err
@@ -98,7 +99,7 @@ func New(cfg Config) (*BtcWallet, error) {
 	if !walletExists {
 		// Wallet has never been created, perform initial set up.
 		wallet, err = loader.CreateNewWallet(
-			pubPass, cfg.PrivatePass, cfg.HdSeed,
+			pubPass, cfg.PrivatePass, cfg.HdSeed, cfg.Birthday,
 		)
 		if err != nil {
 			return nil, err
@@ -114,12 +115,13 @@ func New(cfg Config) (*BtcWallet, error) {
 	}
 
 	return &BtcWallet{
-		cfg:       &cfg,
-		wallet:    wallet,
-		db:        wallet.Database(),
-		chain:     cfg.ChainSource,
-		netParams: cfg.NetParams,
-		utxoCache: make(map[wire.OutPoint]*wire.TxOut),
+		cfg:           &cfg,
+		wallet:        wallet,
+		db:            wallet.Database(),
+		chain:         cfg.ChainSource,
+		netParams:     cfg.NetParams,
+		chainKeyScope: chainKeyScope,
+		utxoCache:     make(map[wire.OutPoint]*wire.TxOut),
 	}, nil
 }
 
@@ -165,7 +167,7 @@ func (b *BtcWallet) Start() error {
 	// We'll now ensure that the KeyScope: (1017, 1) exists within the
 	// internal waddrmgr. We'll need this in order to properly generate the
 	// keys required for signing various contracts.
-	_, err := b.wallet.Manager.FetchScopedKeyManager(lightningKeyScope)
+	_, err := b.wallet.Manager.FetchScopedKeyManager(b.chainKeyScope)
 	if err != nil {
 		// If the scope hasn't yet been created (it wouldn't been
 		// loaded by default if it was), then we'll manually create the
@@ -174,7 +176,7 @@ func (b *BtcWallet) Start() error {
 			addrmgrNs := tx.ReadWriteBucket(waddrmgrNamespaceKey)
 
 			_, err := b.wallet.Manager.NewScopedKeyManager(
-				addrmgrNs, lightningKeyScope, lightningAddrSchema,
+				addrmgrNs, b.chainKeyScope, lightningAddrSchema,
 			)
 			return err
 		})
@@ -259,7 +261,7 @@ func (b *BtcWallet) GetPrivKey(a btcutil.Address) (*btcec.PrivateKey, error) {
 
 // SendOutputs funds, signs, and broadcasts a Bitcoin transaction paying out to
 // the specified outputs. In the case the wallet has insufficient funds, or the
-// outputs are non-standard, a non-nil error will be be returned.
+// outputs are non-standard, a non-nil error will be returned.
 //
 // This is a part of the WalletController interface.
 func (b *BtcWallet) SendOutputs(outputs []*wire.TxOut,
@@ -282,7 +284,7 @@ func (b *BtcWallet) LockOutpoint(o wire.OutPoint) {
 	b.wallet.LockOutpoint(o)
 }
 
-// UnlockOutpoint unlocks an previously locked output, marking it eligible for
+// UnlockOutpoint unlocks a previously locked output, marking it eligible for
 // coin selection.
 //
 // This is a part of the WalletController interface.
@@ -329,9 +331,16 @@ func (b *BtcWallet) ListUnspentWitness(minConfs int32) ([]*lnwallet.Utxo, error)
 				return nil, err
 			}
 
+			// We'll ensure we properly convert the amount given in
+			// BTC to satoshis.
+			amt, err := btcutil.NewAmount(output.Amount)
+			if err != nil {
+				return nil, err
+			}
+
 			utxo := &lnwallet.Utxo{
 				AddressType: addressType,
-				Value:       btcutil.Amount(output.Amount * 1e8),
+				Value:       amt,
 				PkScript:    pkScript,
 				OutPoint: wire.OutPoint{
 					Hash:  *txid,
@@ -385,6 +394,35 @@ func (b *BtcWallet) PublishTransaction(tx *wire.MsgTx) error {
 			}
 
 		case *chain.BitcoindClient:
+			if strings.Contains(err.Error(), "txn-already-in-mempool") {
+				// Transaction in mempool, treat as non-error.
+				return nil
+			}
+			if strings.Contains(err.Error(), "txn-already-known") {
+				// Transaction in mempool, treat as non-error.
+				return nil
+			}
+			if strings.Contains(err.Error(), "already in block") {
+				// Transaction was already mined, we don't
+				// consider this an error.
+				return nil
+			}
+			if strings.Contains(err.Error(), "txn-mempool-conflict") {
+				// Output was spent by other transaction
+				// already in the mempool.
+				return lnwallet.ErrDoubleSpend
+			}
+			if strings.Contains(err.Error(), "insufficient fee") {
+				// RBF enabled transaction did not have enough fee.
+				return lnwallet.ErrDoubleSpend
+			}
+			if strings.Contains(err.Error(), "Missing inputs") {
+				// Transaction is spending either output that
+				// is missing or already spent.
+				return lnwallet.ErrDoubleSpend
+			}
+
+		case *btgChain.BgolddClient:
 			if strings.Contains(err.Error(), "txn-already-in-mempool") {
 				// Transaction in mempool, treat as non-error.
 				return nil
@@ -507,7 +545,7 @@ func minedTransactionsToDetails(
 }
 
 // unminedTransactionsToDetail is a helper function which converts a summary
-// for a unconfirmed transaction to a transaction detail.
+// for an unconfirmed transaction to a transaction detail.
 func unminedTransactionsToDetail(
 	summary base.TransactionSummary,
 ) (*lnwallet.TransactionDetail, error) {

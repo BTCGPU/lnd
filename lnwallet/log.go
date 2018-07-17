@@ -3,8 +3,8 @@ package lnwallet
 import (
 	"github.com/btcsuite/btclog"
 	"github.com/roasbeef/btcwallet/chain"
-	btcwallet "github.com/roasbeef/btcwallet/wallet"
 	"github.com/roasbeef/btcwallet/wtxmgr"
+	btcwallet "github.com/shelvenzhou/btgwallet/wallet"
 )
 
 // walletLog is a logger that is initialized with no output filters.  This

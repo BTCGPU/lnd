@@ -3,8 +3,8 @@ package lnwallet
 import (
 	"fmt"
 
-	"github.com/roasbeef/btcd/txscript"
 	"github.com/roasbeef/btcd/wire"
+	"github.com/shelvenzhou/btgd/txscript"
 )
 
 // WitnessType determines how an output's witness will be generated. The
