@@ -4,21 +4,13 @@ package itest
 
 import (
 	"bytes"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/hex"
-	"encoding/pem"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"math"
-	"math/big"
-	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -28,6 +20,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BTCGPU/lnd"
+	"github.com/BTCGPU/lnd/chanbackup"
+	"github.com/BTCGPU/lnd/lnrpc"
+	"github.com/BTCGPU/lnd/lnrpc/invoicesrpc"
+	"github.com/BTCGPU/lnd/lnrpc/routerrpc"
+	"github.com/BTCGPU/lnd/lnrpc/watchtowerrpc"
+	"github.com/BTCGPU/lnd/lntest"
+	"github.com/BTCGPU/lnd/lntypes"
+	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/BTCGPU/lnd/routing"
 	"github.com/btgsuite/btgd/btcjson"
 	"github.com/btgsuite/btgd/chaincfg"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
@@ -37,15 +39,6 @@ import (
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-errors/errors"
-	"github.com/BTCGPU/lnd/chanbackup"
-	"github.com/BTCGPU/lnd"
-	"github.com/BTCGPU/lnd/lnrpc"
-	"github.com/BTCGPU/lnd/lntest"
-	"github.com/BTCGPU/lnd/lnwire"
-	"github.com/BTCGPU/lnd/lnrpc/invoicesrpc"
-	"github.com/BTCGPU/lnd/lnrpc/routerrpc"
-	"github.com/BTCGPU/lnd/lnrpc/watchtowerrpc"
-	"github.com/BTCGPU/lnd/lntypes"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
@@ -73,12 +66,16 @@ type harnessTest struct {
 	// testCase is populated during test execution and represents the
 	// current test case.
 	testCase *testCase
+
+	// lndHarness is a reference to the current network harness. Will be
+	// nil if not yet set up.
+	lndHarness *lntest.NetworkHarness
 }
 
 // newHarnessTest creates a new instance of a harnessTest from a regular
 // testing.T instance.
-func newHarnessTest(t *testing.T) *harnessTest {
-	return &harnessTest{t, nil}
+func newHarnessTest(t *testing.T, net *lntest.NetworkHarness) *harnessTest {
+	return &harnessTest{t, nil, net}
 }
 
 // Skipf calls the underlying testing.T's Skip method, causing the current test
@@ -91,6 +88,10 @@ func (h *harnessTest) Skipf(format string, args ...interface{}) {
 // integration tests should mark test failures solely with this method due to
 // the error stack traces it produces.
 func (h *harnessTest) Fatalf(format string, a ...interface{}) {
+	if h.lndHarness != nil {
+		h.lndHarness.SaveProfilesPages()
+	}
+
 	stacktrace := errors.Wrap(fmt.Sprintf(format, a...), 1).ErrorStack()
 
 	if h.testCase != nil {
@@ -103,8 +104,7 @@ func (h *harnessTest) Fatalf(format string, a ...interface{}) {
 
 // RunTestCase executes a harness test case. Any errors or panics will be
 // represented as fatal.
-func (h *harnessTest) RunTestCase(testCase *testCase,
-	net *lntest.NetworkHarness) {
+func (h *harnessTest) RunTestCase(testCase *testCase) {
 
 	h.testCase = testCase
 	defer func() {
@@ -119,7 +119,7 @@ func (h *harnessTest) RunTestCase(testCase *testCase,
 		}
 	}()
 
-	testCase.test(net, h)
+	testCase.test(h.lndHarness, h)
 
 	return
 }
@@ -2606,6 +2606,12 @@ func checkPendingHtlcStageAndMaturity(
 	return nil
 }
 
+// padCLTV is a small helper function that pads a cltv value with a block
+// padding.
+func padCLTV(cltv uint32) uint32 {
+	return cltv + uint32(routing.BlockPadding)
+}
+
 // testChannelForceClosure performs a test to exercise the behavior of "force"
 // closing a channel or unilaterally broadcasting the latest local commitment
 // state on-chain. The test creates a new channel between Alice and Carol, then
@@ -2734,8 +2740,8 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	var (
 		startHeight           = uint32(curHeight)
 		commCsvMaturityHeight = startHeight + 1 + defaultCSV
-		htlcExpiryHeight      = startHeight + defaultCLTV
-		htlcCsvMaturityHeight = startHeight + defaultCLTV + 1 + defaultCSV
+		htlcExpiryHeight      = padCLTV(startHeight + defaultCLTV)
+		htlcCsvMaturityHeight = padCLTV(startHeight + defaultCLTV + 1 + defaultCSV)
 	)
 
 	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
@@ -3056,8 +3062,8 @@ func testChannelForceClosure(net *lntest.NetworkHarness, t *harnessTest) {
 	// output spending from the commitment txn, so we must deduct the number
 	// of blocks we have generated since adding it to the nursery, and take
 	// an additional block off so that we end up one block shy of the expiry
-	// height.
-	cltvHeightDelta := defaultCLTV - defaultCSV - 2 - 1
+	// height, and add the block padding.
+	cltvHeightDelta := padCLTV(defaultCLTV - defaultCSV - 2 - 1)
 
 	// Advance the blockchain until just before the CLTV expires, nothing
 	// exciting should have happened during this time.
@@ -5965,9 +5971,12 @@ func testBasicChannelCreationAndUpdates(net *lntest.NetworkHarness, t *harnessTe
 		amount      = lnd.MaxBtcFundingAmount
 	)
 
-	// Let Bob subscribe to channel notifications.
+	// Subscribe Bob and Alice to channel event notifications.
 	bobChanSub := subscribeChannelNotifications(ctxb, t, net.Bob)
 	defer close(bobChanSub.quit)
+
+	aliceChanSub := subscribeChannelNotifications(ctxb, t, net.Alice)
+	defer close(aliceChanSub.quit)
 
 	// Open the channel between Alice and Bob, asserting that the
 	// channel has been properly open on-chain.
@@ -5982,31 +5991,52 @@ func testBasicChannelCreationAndUpdates(net *lntest.NetworkHarness, t *harnessTe
 		)
 	}
 
-	// Since each of the channels just became open, Bob should we receive an
-	// open and an active notification for each channel.
+	// Since each of the channels just became open, Bob and Alice should
+	// each receive an open and an active notification for each channel.
 	var numChannelUpds int
-	for numChannelUpds < 2*numChannels {
-		select {
-		case update := <-bobChanSub.updateChan:
-			switch update.Type {
-			case lnrpc.ChannelEventUpdate_ACTIVE_CHANNEL:
-			case lnrpc.ChannelEventUpdate_OPEN_CHANNEL:
-			default:
-				t.Fatalf("update type mismatch: expected open or active "+
-					"channel notification, got: %v", update.Type)
+	const totalNtfns = 2 * numChannels
+	verifyOpenUpdatesReceived := func(sub channelSubscription) error {
+		numChannelUpds = 0
+		for numChannelUpds < totalNtfns {
+			select {
+			case update := <-sub.updateChan:
+				switch update.Type {
+				case lnrpc.ChannelEventUpdate_ACTIVE_CHANNEL:
+					if numChannelUpds%2 != 1 {
+						return fmt.Errorf("expected open" +
+							"channel ntfn, got active " +
+							"channel ntfn instead")
+					}
+				case lnrpc.ChannelEventUpdate_OPEN_CHANNEL:
+					if numChannelUpds%2 != 0 {
+						return fmt.Errorf("expected active" +
+							"channel ntfn, got open" +
+							"channel ntfn instead")
+					}
+				default:
+					return fmt.Errorf("update type mismatch: "+
+						"expected open or active channel "+
+						"notification, got: %v",
+						update.Type)
+				}
+				numChannelUpds++
+			case <-time.After(time.Second * 10):
+				return fmt.Errorf("timeout waiting for channel "+
+					"notifications, only received %d/%d "+
+					"chanupds", numChannelUpds,
+					totalNtfns)
 			}
-			numChannelUpds++
-		case <-time.After(time.Second * 10):
-			t.Fatalf("timeout waiting for channel notifications, "+
-				"only received %d/%d chanupds", numChannelUpds,
-				numChannels)
 		}
+
+		return nil
 	}
 
-	// Subscribe Alice to channel updates so we can test that both remote
-	// and local force close notifications are received correctly.
-	aliceChanSub := subscribeChannelNotifications(ctxb, t, net.Alice)
-	defer close(aliceChanSub.quit)
+	if err := verifyOpenUpdatesReceived(bobChanSub); err != nil {
+		t.Fatalf("error verifying open updates: %v", err)
+	}
+	if err := verifyOpenUpdatesReceived(aliceChanSub); err != nil {
+		t.Fatalf("error verifying open updates: %v", err)
+	}
 
 	// Close the channel between Alice and Bob, asserting that the channel
 	// has been properly closed on-chain.
@@ -9386,22 +9416,30 @@ func testAsyncPayments(net *lntest.NetworkHarness, t *harnessTest) {
 
 	// Next query for Bob's and Alice's channel states, in order to confirm
 	// that all payment have been successful transmitted.
-	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
-	aliceChan, err := getChanInfo(ctxt, net.Alice)
-	if len(aliceChan.PendingHtlcs) != 0 {
-		t.Fatalf("alice's pending htlcs is incorrect, got %v, "+
-			"expected %v", len(aliceChan.PendingHtlcs), 0)
-	}
+
+	// Wait for the revocation to be received so alice no longer has pending
+	// htlcs listed and has correct balances. This is needed due to the fact
+	// that we now pipeline the settles.
+	err = lntest.WaitPredicate(func() bool {
+		ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
+		aliceChan, err := getChanInfo(ctxt, net.Alice)
+		if err != nil {
+			return false
+		}
+		if len(aliceChan.PendingHtlcs) != 0 {
+			return false
+		}
+		if aliceChan.RemoteBalance != bobAmt {
+			return false
+		}
+		if aliceChan.LocalBalance != aliceAmt {
+			return false
+		}
+
+		return true
+	}, time.Second*5)
 	if err != nil {
-		t.Fatalf("unable to get bob's channel info: %v", err)
-	}
-	if aliceChan.RemoteBalance != bobAmt {
-		t.Fatalf("alice's remote balance is incorrect, got %v, "+
-			"expected %v", aliceChan.RemoteBalance, bobAmt)
-	}
-	if aliceChan.LocalBalance != aliceAmt {
-		t.Fatalf("alice's local balance is incorrect, got %v, "+
-			"expected %v", aliceChan.LocalBalance, aliceAmt)
+		t.Fatalf("failed to assert alice's pending htlcs and/or remote/local balance")
 	}
 
 	// Wait for Bob to receive revocation from Alice.
@@ -9920,7 +9958,9 @@ func testMultiHopHtlcLocalTimeout(net *lntest.NetworkHarness, t *harnessTest) {
 	// commitment transaction due to the fact that the HTLC is about to
 	// timeout. With the default outgoing broadcast delta of zero, this will
 	// be the same height as the htlc expiry height.
-	numBlocks := uint32(finalCltvDelta - lnd.DefaultOutgoingBroadcastDelta)
+	numBlocks := padCLTV(
+		uint32(finalCltvDelta - lnd.DefaultOutgoingBroadcastDelta),
+	)
 	if _, err := net.Miner.Node.Generate(numBlocks); err != nil {
 		t.Fatalf("unable to generate blocks: %v", err)
 	}
@@ -10186,7 +10226,8 @@ func testMultiHopLocalForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 
 	// We'll now mine enough blocks for the HTLC to expire. After this, Bob
 	// should hand off the now expired HTLC output to the utxo nursery.
-	if _, err := net.Miner.Node.Generate(finalCltvDelta - defaultCSV - 1); err != nil {
+	numBlocks := padCLTV(uint32(finalCltvDelta - defaultCSV - 1))
+	if _, err := net.Miner.Node.Generate(numBlocks); err != nil {
 		t.Fatalf("unable to generate blocks: %v", err)
 	}
 
@@ -10439,7 +10480,8 @@ func testMultiHopRemoteForceCloseOnChainHtlcTimeout(net *lntest.NetworkHarness,
 	// Next, we'll mine enough blocks for the HTLC to expire. At this
 	// point, Bob should hand off the output to his internal utxo nursery,
 	// which will broadcast a sweep transaction.
-	if _, err := net.Miner.Node.Generate(finalCltvDelta - 1); err != nil {
+	numBlocks := padCLTV(finalCltvDelta - 1)
+	if _, err := net.Miner.Node.Generate(numBlocks); err != nil {
 		t.Fatalf("unable to generate blocks: %v", err)
 	}
 
@@ -13513,7 +13555,7 @@ func testChannelBackupRestore(net *lntest.NetworkHarness, t *harnessTest) {
 
 	for _, testCase := range testCases {
 		success := t.t.Run(testCase.name, func(t *testing.T) {
-			h := newHarnessTest(t)
+			h := newHarnessTest(t, net)
 			testChanRestoreScenario(h, net, &testCase, password)
 		})
 		if !success {
@@ -13834,7 +13876,7 @@ func testHoldInvoicePersistence(net *lntest.NetworkHarness, t *harnessTest) {
 						status.State)
 				}
 			} else {
-				if status.State != routerrpc.PaymentState_FAILED_NO_ROUTE {
+				if status.State != routerrpc.PaymentState_FAILED_INCORRECT_PAYMENT_DETAILS {
 					t.Fatalf("state not failed: %v",
 						status.State)
 				}
@@ -13878,133 +13920,6 @@ func testHoldInvoicePersistence(net *lntest.NetworkHarness, t *harnessTest) {
 			}
 		}
 	}
-}
-
-// testTLSAutoRegeneration creates an expired TLS certificate, to test that a
-// new TLS certificate pair is regenerated when the old pair expires. This is
-// necessary because the pair expires after a little over a year.
-func testTLSAutoRegeneration(lnNet *lntest.NetworkHarness, t *harnessTest) {
-	certPath := lnNet.Alice.TLSCertStr()
-	keyPath := lnNet.Alice.TLSKeyStr()
-
-	// Create an expired certificate.
-	expiredCert := genExpiredCertPair(
-		t, lnNet, certPath, keyPath,
-	)
-
-	// Restart the node to test that the cert is automatically regenerated.
-	lnNet.RestartNode(lnNet.Alice, nil, nil)
-
-	// Grab the newly generated certificate.
-	newCertData, err := tls.LoadX509KeyPair(certPath, keyPath)
-	if err != nil {
-		t.Fatalf("couldn't grab new certificate")
-	}
-
-	newCert, err := x509.ParseCertificate(newCertData.Certificate[0])
-	if err != nil {
-		t.Fatalf("couldn't parse new certificate")
-	}
-
-	// Check that the expired certificate was successfully deleted and
-	// replaced with a new one.
-	if !newCert.NotAfter.After(expiredCert.NotAfter) {
-		t.Fatalf("New certificate expiration is too old")
-	}
-}
-
-// genExpiredCertPair generates an expired key/cert pair to the paths
-// provided to test that expired certificates are being regenerated correctly.
-func genExpiredCertPair(t *harnessTest, lnNet *lntest.NetworkHarness, certPath,
-	keyPath string) *x509.Certificate {
-	// Max serial number.
-	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-
-	// Generate a serial number that's below the serialNumberLimit.
-	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
-	if err != nil {
-		t.Fatalf("failed to generate serial number: %s", err)
-	}
-
-	host := "lightning"
-
-	// Create a simple ip address for the fake certificate.
-	ipAddresses := []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")}
-
-	dnsNames := []string{host, "unix", "unixpacket"}
-
-	// Construct the certificate template.
-	template := x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject: pkix.Name{
-			Organization: []string{"lnd autogenerated cert"},
-			CommonName:   host,
-		},
-		NotBefore: time.Now().Add(-time.Hour * 24),
-		NotAfter:  time.Now(),
-
-		KeyUsage: x509.KeyUsageKeyEncipherment |
-			x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		IsCA:                  true, // so can sign self.
-		BasicConstraintsValid: true,
-
-		DNSNames:    dnsNames,
-		IPAddresses: ipAddresses,
-	}
-
-	// Generate a private key for the certificate.
-	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("failed to generate a private key")
-	}
-
-	derBytes, err := x509.CreateCertificate(
-		rand.Reader, &template, &template, &priv.PublicKey, priv)
-	if err != nil {
-		t.Fatalf("failed to create certificate: %v", err)
-	}
-
-	expiredCert, err := x509.ParseCertificate(derBytes)
-	if err != nil {
-		t.Fatalf("failed to parse certificate: %v", err)
-	}
-
-	certBuf := bytes.Buffer{}
-	err = pem.Encode(
-		&certBuf, &pem.Block{
-			Type:  "CERTIFICATE",
-			Bytes: derBytes,
-		},
-	)
-	if err != nil {
-		t.Fatalf("failed to encode certificate: %v", err)
-	}
-
-	keybytes, err := x509.MarshalECPrivateKey(priv)
-	if err != nil {
-		t.Fatalf("unable to encode privkey: %v", err)
-	}
-	keyBuf := bytes.Buffer{}
-	err = pem.Encode(
-		&keyBuf, &pem.Block{
-			Type:  "EC PRIVATE KEY",
-			Bytes: keybytes,
-		},
-	)
-	if err != nil {
-		t.Fatalf("failed to encode private key: %v", err)
-	}
-
-	// Write cert and key files.
-	if err = ioutil.WriteFile(certPath, certBuf.Bytes(), 0644); err != nil {
-		t.Fatalf("failed to write cert file: %v", err)
-	}
-	if err = ioutil.WriteFile(keyPath, keyBuf.Bytes(), 0600); err != nil {
-		os.Remove(certPath)
-		t.Fatalf("failed to write key file: %v", err)
-	}
-
-	return expiredCert
 }
 
 type testCase struct {
@@ -14258,16 +14173,12 @@ var testsCases = []*testCase{
 		name: "cpfp",
 		test: testCPFP,
 	},
-	{
-		name: "automatic certificate regeneration",
-		test: testTLSAutoRegeneration,
-	},
 }
 
 // TestLightningNetworkDaemon performs a series of integration tests amongst a
 // programmatically driven network of lnd nodes.
 func TestLightningNetworkDaemon(t *testing.T) {
-	ht := newHarnessTest(t)
+	ht := newHarnessTest(t, nil)
 
 	// Declare the network harness here to gain access to its
 	// 'OnTxAccepted' call back.
@@ -14391,8 +14302,8 @@ func TestLightningNetworkDaemon(t *testing.T) {
 		}
 
 		success := t.Run(testCase.name, func(t1 *testing.T) {
-			ht := newHarnessTest(t1)
-			ht.RunTestCase(testCase, lndHarness)
+			ht := newHarnessTest(t1, lndHarness)
+			ht.RunTestCase(testCase)
 		})
 
 		// Stop at the first failure. Mimic behavior of original test

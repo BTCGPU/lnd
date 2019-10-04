@@ -1398,32 +1398,11 @@ func create(ctx *cli.Context) error {
 	client, cleanUp := getWalletUnlockerClient(ctx)
 	defer cleanUp()
 
-	// First, we'll prompt the user for their passphrase twice to ensure
-	// both attempts match up properly.
-	fmt.Printf("Input wallet password: ")
-	pw1, err := terminal.ReadPassword(int(syscall.Stdin))
+	walletPassword, err := capturePassword(
+		"Input wallet password: ", false, walletunlocker.ValidatePassword,
+	)
 	if err != nil {
 		return err
-	}
-	fmt.Println()
-
-	fmt.Printf("Confirm wallet password: ")
-	pw2, err := terminal.ReadPassword(int(syscall.Stdin))
-	if err != nil {
-		return err
-	}
-	fmt.Println()
-
-	// If the passwords don't match, then we'll return an error.
-	if !bytes.Equal(pw1, pw2) {
-		return fmt.Errorf("passwords don't match")
-	}
-
-	// If the password length is less than 8 characters, then we'll
-	// return an error.
-	pwErr := walletunlocker.ValidatePassword(pw1)
-	if pwErr != nil {
-		return pwErr
 	}
 
 	// Next, we'll see if the user has 24-word mnemonic they want to use to
@@ -1539,31 +1518,15 @@ mnemonicCheck:
 		// want to use, we'll generate a fresh one with the GenSeed
 		// command.
 		fmt.Println("Your cipher seed can optionally be encrypted.")
-		fmt.Printf("Input your passphrase if you wish to encrypt it " +
+
+		instruction := "Input your passphrase if you wish to encrypt it " +
 			"(or press enter to proceed without a cipher seed " +
-			"passphrase): ")
-		aezeedPass1, err := terminal.ReadPassword(int(syscall.Stdin))
+			"passphrase): "
+		aezeedPass, err = capturePassword(
+			instruction, true, func(_ []byte) error { return nil },
+		)
 		if err != nil {
 			return err
-		}
-		fmt.Println()
-
-		if len(aezeedPass1) != 0 {
-			fmt.Printf("Confirm cipher seed passphrase: ")
-			aezeedPass2, err := terminal.ReadPassword(
-				int(syscall.Stdin),
-			)
-			if err != nil {
-				return err
-			}
-			fmt.Println()
-
-			// If the passwords don't match, then we'll return an
-			// error.
-			if !bytes.Equal(aezeedPass1, aezeedPass2) {
-				return fmt.Errorf("cipher seed pass phrases " +
-					"don't match")
-			}
 		}
 
 		fmt.Println()
@@ -1571,7 +1534,7 @@ mnemonicCheck:
 		fmt.Println()
 
 		genSeedReq := &lnrpc.GenSeedRequest{
-			AezeedPassphrase: aezeedPass1,
+			AezeedPassphrase: aezeedPass,
 		}
 		seedResp, err := client.GenSeed(ctxb, genSeedReq)
 		if err != nil {
@@ -1579,7 +1542,6 @@ mnemonicCheck:
 		}
 
 		cipherSeedMnemonic = seedResp.CipherSeedMnemonic
-		aezeedPass = aezeedPass1
 	}
 
 	// Before we initialize the wallet, we'll display the cipher seed to
@@ -1635,7 +1597,7 @@ mnemonicCheck:
 	// With either the user's prior cipher seed, or a newly generated one,
 	// we'll go ahead and initialize the wallet.
 	req := &lnrpc.InitWalletRequest{
-		WalletPassword:     pw1,
+		WalletPassword:     walletPassword,
 		CipherSeedMnemonic: cipherSeedMnemonic,
 		AezeedPassphrase:   aezeedPass,
 		RecoveryWindow:     recoveryWindow,
@@ -1648,6 +1610,55 @@ mnemonicCheck:
 	fmt.Println("\nlnd successfully initialized!")
 
 	return nil
+}
+
+// capturePassword returns a password value that has been entered twice by the
+// user, to ensure that the user knows what password they have entered. The user
+// will be prompted to retry until the passwords match. If the optional param is
+// true, the function may return an empty byte array if the user opts against
+// using a password.
+func capturePassword(instruction string, optional bool,
+	validate func([]byte) error) ([]byte, error) {
+
+	for {
+		fmt.Printf(instruction)
+		password, err := terminal.ReadPassword(int(syscall.Stdin))
+		if err != nil {
+			return nil, err
+		}
+		fmt.Println()
+
+		// Do not require users to repeat password if
+		// it is optional and they are not using one.
+		if len(password) == 0 && optional {
+			return nil, nil
+		}
+
+		// If the password provided is not valid, restart
+		// password capture process from the beginning.
+		if err := validate(password); err != nil {
+			fmt.Println(err.Error())
+			fmt.Println()
+			continue
+		}
+
+		fmt.Println("Confirm password:")
+		passwordConfirmed, err := terminal.ReadPassword(
+			int(syscall.Stdin),
+		)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Println()
+
+		if bytes.Equal(password, passwordConfirmed) {
+			return password, nil
+		}
+
+		fmt.Println("Passwords don't match, " +
+			"please try again")
+		fmt.Println()
+	}
 }
 
 var unlockCommand = cli.Command{
@@ -2997,6 +3008,10 @@ var queryRoutesCommand = cli.Command{
 			Usage: "(optional) number of blocks the last hop has to reveal " +
 				"the preimage",
 		},
+		cli.BoolFlag{
+			Name:  "use_mc",
+			Usage: "use mission control probabilities",
+		},
 	},
 	Action: actionDecorator(queryRoutes),
 }
@@ -3042,10 +3057,11 @@ func queryRoutes(ctx *cli.Context) error {
 	}
 
 	req := &lnrpc.QueryRoutesRequest{
-		PubKey:         dest,
-		Amt:            amt,
-		FeeLimit:       feeLimit,
-		FinalCltvDelta: int32(ctx.Int("final_cltv_delta")),
+		PubKey:            dest,
+		Amt:               amt,
+		FeeLimit:          feeLimit,
+		FinalCltvDelta:    int32(ctx.Int("final_cltv_delta")),
+		UseMissionControl: ctx.Bool("use_mc"),
 	}
 
 	route, err := client.QueryRoutes(ctxb, req)
@@ -3364,7 +3380,8 @@ var updateChannelPolicyCommand = cli.Command{
 			Name: "fee_rate",
 			Usage: "the fee rate that will be charged " +
 				"proportionally based on the value of each " +
-				"forwarded HTLC, the lowest possible rate is 0.000001",
+				"forwarded HTLC, the lowest possible rate is 0 " +
+				"with a granularity of 0.000001 (millionths)",
 		},
 		cli.Int64Flag{
 			Name: "time_lock_delta",
@@ -3514,8 +3531,9 @@ var forwardingHistoryCommand = cli.Command{
 	Query the HTLC switch's internal forwarding log for all completed
 	payment circuits (HTLCs) over a particular time range (--start_time and
 	--end_time). The start and end times are meant to be expressed in
-	seconds since the Unix epoch. If a start and end time aren't provided,
-	then events over the past 24 hours are queried for.
+	seconds since the Unix epoch. If --start_time isn't provided,
+	then 24 hours ago is used.  If --end_time isn't provided,
+	then the current time is used.
 
 	The max number of events returned is 50k. The default number is 100,
 	callers can use the --max_events param to modify this value.
@@ -3872,7 +3890,7 @@ var restoreChanBackupCommand = cli.Command{
 		"backup",
 	ArgsUsage: "[--single_backup] [--multi_backup] [--multi_file=",
 	Description: `
-	Allows a suer to restore a Static Channel Backup (SCB) that was
+	Allows a user to restore a Static Channel Backup (SCB) that was
 	obtained either via the exportchanbackup command, or from lnd's
 	automatically manged channels.backup file. This command should be used
 	if a user is attempting to restore a channel due to data loss on a

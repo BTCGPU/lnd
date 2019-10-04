@@ -409,8 +409,7 @@ func newServer(listenAddrs []net.Addr, chanDB *channeldb.DB,
 	}
 
 	s.htlcSwitch, err = htlcswitch.New(htlcswitch.Config{
-		DB:      chanDB,
-		SelfKey: s.identityPriv.PubKey(),
+		DB: chanDB,
 		LocalChannelClose: func(pubKey []byte,
 			request *htlcswitch.ChanClose) {
 
@@ -438,12 +437,11 @@ func newServer(listenAddrs []net.Addr, chanDB *channeldb.DB,
 		ExtractErrorEncrypter:  s.sphinx.ExtractErrorEncrypter,
 		FetchLastChannelUpdate: s.fetchLastChanUpdate(),
 		Notifier:               s.cc.chainNotifier,
-		FwdEventTicker: ticker.New(
-			htlcswitch.DefaultFwdEventInterval),
-		LogEventTicker: ticker.New(
-			htlcswitch.DefaultLogInterval),
-		NotifyActiveChannel:   s.channelNotifier.NotifyActiveChannelEvent,
-		NotifyInactiveChannel: s.channelNotifier.NotifyInactiveChannelEvent,
+		FwdEventTicker:         ticker.New(htlcswitch.DefaultFwdEventInterval),
+		LogEventTicker:         ticker.New(htlcswitch.DefaultLogInterval),
+		AckEventTicker:         ticker.New(htlcswitch.DefaultAckInterval),
+		NotifyActiveChannel:    s.channelNotifier.NotifyActiveChannelEvent,
+		NotifyInactiveChannel:  s.channelNotifier.NotifyInactiveChannelEvent,
 	}, uint32(currentHeight))
 	if err != nil {
 		return nil, err
@@ -653,10 +651,32 @@ func newServer(listenAddrs []net.Addr, chanDB *channeldb.DB,
 	//
 	// TODO(joostjager): When we are further in the process of moving to sub
 	// servers, the mission control instance itself can be moved there too.
+	routingConfig := routerrpc.GetRoutingConfig(cfg.SubRPCServers.RouterRPC)
+
 	s.missionControl = routing.NewMissionControl(
-		chanGraph, selfNode, queryBandwidth,
-		routerrpc.GetMissionControlConfig(cfg.SubRPCServers.RouterRPC),
+		&routing.MissionControlConfig{
+			AprioriHopProbability: routingConfig.AprioriHopProbability,
+			PenaltyHalfLife:       routingConfig.PenaltyHalfLife,
+		},
 	)
+
+	srvrLog.Debugf("Instantiating payment session source with config: "+
+		"PaymentAttemptPenalty=%v, MinRouteProbability=%v",
+		int64(routingConfig.PaymentAttemptPenalty.ToSatoshis()),
+		routingConfig.MinRouteProbability)
+
+	pathFindingConfig := routing.PathFindingConfig{
+		PaymentAttemptPenalty: routingConfig.PaymentAttemptPenalty,
+		MinProbability:        routingConfig.MinRouteProbability,
+	}
+
+	paymentSessionSource := &routing.SessionSource{
+		Graph:             chanGraph,
+		MissionControl:    s.missionControl,
+		QueryBandwidth:    queryBandwidth,
+		SelfNode:          selfNode,
+		PathFindingConfig: pathFindingConfig,
+	}
 
 	paymentControl := channeldb.NewPaymentControl(chanDB)
 
@@ -669,11 +689,13 @@ func newServer(listenAddrs []net.Addr, chanDB *channeldb.DB,
 		Payer:              s.htlcSwitch,
 		Control:            s.controlTower,
 		MissionControl:     s.missionControl,
+		SessionSource:      paymentSessionSource,
 		ChannelPruneExpiry: routing.DefaultChannelPruneExpiry,
 		GraphPruneInterval: time.Duration(time.Hour),
 		QueryBandwidth:     queryBandwidth,
 		AssumeChannelValid: cfg.Routing.UseAssumeChannelValid(),
 		NextPaymentID:      sequencer.NextID,
+		PathFindingConfig:  pathFindingConfig,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("can't create router: %v", err)
@@ -1033,6 +1055,8 @@ func newServer(listenAddrs []net.Addr, chanDB *channeldb.DB,
 		ZombieSweeperInterval:  1 * time.Minute,
 		ReservationTimeout:     10 * time.Minute,
 		MinChanSize:            btcutil.Amount(cfg.MinChanSize),
+		MaxPendingChannels:     cfg.MaxPendingChannels,
+		RejectPush:             cfg.RejectPush,
 		NotifyOpenChannelEvent: s.channelNotifier.NotifyOpenChannelEvent,
 	})
 	if err != nil {
@@ -1080,8 +1104,8 @@ func newServer(listenAddrs []net.Addr, chanDB *channeldb.DB,
 			Dial:           cfg.net.Dial,
 			AuthDial:       wtclient.AuthDial,
 			DB:             towerClientDB,
-			Policy:         wtpolicy.DefaultPolicy(),
 			PrivateTower:   cfg.WtClient.PrivateTowers[0],
+			Policy:         policy,
 			ChainHash:      *activeNetParams.GenesisHash,
 			MinBackoff:     10 * time.Second,
 			MaxBackoff:     5 * time.Minute,
@@ -2959,8 +2983,8 @@ type openChanReq struct {
 
 	chainHash chainhash.Hash
 
-	localFundingAmt  btcutil.Amount
-	remoteFundingAmt btcutil.Amount
+	subtractFees    bool
+	localFundingAmt btcutil.Amount
 
 	pushAmt lnwire.MilliSatoshi
 

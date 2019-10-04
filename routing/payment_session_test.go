@@ -14,12 +14,13 @@ func TestRequestRoute(t *testing.T) {
 	)
 
 	findPath := func(g *graphParams, r *RestrictParams,
-		source, target route.Vertex, amt lnwire.MilliSatoshi) (
-		[]*channeldb.ChannelEdgePolicy, error) {
+		cfg *PathFindingConfig, source, target route.Vertex,
+		amt lnwire.MilliSatoshi) ([]*channeldb.ChannelEdgePolicy,
+		error) {
 
 		// We expect find path to receive a cltv limit excluding the
-		// final cltv delta.
-		if *r.CltvLimit != 22 {
+		// final cltv delta (including the block padding).
+		if *r.CltvLimit != 22-uint32(BlockPadding) {
 			t.Fatal("wrong cltv limit")
 		}
 
@@ -32,12 +33,16 @@ func TestRequestRoute(t *testing.T) {
 		return path, nil
 	}
 
-	session := &paymentSession{
-		mc: &MissionControl{
-			selfNode: &channeldb.LightningNode{},
-			cfg:      &MissionControlConfig{},
+	sessionSource := &SessionSource{
+		SelfNode: &channeldb.LightningNode{},
+		MissionControl: &MissionControl{
+			cfg: &MissionControlConfig{},
 		},
-		pathFinder: findPath,
+	}
+
+	session := &paymentSession{
+		sessionSource: sessionSource,
+		pathFinder:    findPath,
 	}
 
 	cltvLimit := uint32(30)
@@ -54,7 +59,8 @@ func TestRequestRoute(t *testing.T) {
 	}
 
 	// We expect an absolute route lock value of height + finalCltvDelta
-	if route.TotalTimeLock != 18 {
+	// + BlockPadding.
+	if route.TotalTimeLock != 18+uint32(BlockPadding) {
 		t.Fatalf("unexpected total time lock of %v",
 			route.TotalTimeLock)
 	}

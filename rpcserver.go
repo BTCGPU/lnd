@@ -168,9 +168,12 @@ var (
 			Action: "write",
 		},
 	}
+)
 
-	// permissions maps RPC calls to the permissions they require.
-	permissions = map[string][]bakery.Op{
+// mainRPCServerPermissions returns a mapping of the main RPC server calls to
+// the permissions they require.
+func mainRPCServerPermissions() map[string][]bakery.Op {
+	return map[string][]bakery.Op{
 		"/lnrpc.Lightning/SendCoins": {{
 			Entity: "onchain",
 			Action: "write",
@@ -381,7 +384,7 @@ var (
 			Action: "read",
 		}},
 	}
-)
+}
 
 // rpcServer is a gRPC, RPC front end to the lnd daemon.
 // TODO(roasbeef): pagination support for the list-style calls
@@ -520,6 +523,7 @@ func newRPCServer(s *server, macService *macaroons.Service,
 	// Next, we need to merge the set of sub server macaroon permissions
 	// with the main RPC server permissions so we can unite them under a
 	// single set of interceptors.
+	permissions := mainRPCServerPermissions()
 	for _, subServerPerm := range subServerPerms {
 		for method, ops := range subServerPerm {
 			// For each new method:ops combo, we also ensure that
@@ -2228,11 +2232,13 @@ func (r *rpcServer) PendingChannels(ctx context.Context,
 
 		resp.PendingOpenChannels[i] = &lnrpc.PendingChannelsResponse_PendingOpenChannel{
 			Channel: &lnrpc.PendingChannelsResponse_PendingChannel{
-				RemoteNodePub: hex.EncodeToString(pub),
-				ChannelPoint:  pendingChan.FundingOutpoint.String(),
-				Capacity:      int64(pendingChan.Capacity),
-				LocalBalance:  int64(localCommitment.LocalBalance.ToSatoshis()),
-				RemoteBalance: int64(localCommitment.RemoteBalance.ToSatoshis()),
+				RemoteNodePub:        hex.EncodeToString(pub),
+				ChannelPoint:         pendingChan.FundingOutpoint.String(),
+				Capacity:             int64(pendingChan.Capacity),
+				LocalBalance:         int64(localCommitment.LocalBalance.ToSatoshis()),
+				RemoteBalance:        int64(localCommitment.RemoteBalance.ToSatoshis()),
+				LocalChanReserveSat:  int64(pendingChan.LocalChanCfg.ChanReserve),
+				RemoteChanReserveSat: int64(pendingChan.RemoteChanCfg.ChanReserve),
 			},
 			CommitWeight: commitWeight,
 			CommitFee:    int64(localCommitment.CommitFee),
@@ -2643,6 +2649,8 @@ func createRPCOpenChannel(r *rpcServer, graph *channeldb.ChannelGraph,
 		CsvDelay:              uint32(dbChannel.LocalChanCfg.CsvDelay),
 		Initiator:             dbChannel.IsInitiator,
 		ChanStatusFlags:       dbChannel.ChanStatus().String(),
+		LocalChanReserveSat:   int64(dbChannel.LocalChanCfg.ChanReserve),
+		RemoteChanReserveSat:  int64(dbChannel.RemoteChanCfg.ChanReserve),
 	}
 
 	for i, htlc := range localCommit.Htlcs {
@@ -3576,6 +3584,10 @@ func (r *rpcServer) SubscribeTransactions(req *lnrpc.GetTransactionsRequest,
 	for {
 		select {
 		case tx := <-txClient.ConfirmedTransactions():
+			destAddresses := make([]string, 0, len(tx.DestAddresses))
+			for _, destAddress := range tx.DestAddresses {
+				destAddresses = append(destAddresses, destAddress.EncodeAddress())
+			}
 			detail := &lnrpc.Transaction{
 				TxHash:           tx.Hash.String(),
 				Amount:           int64(tx.Value),
@@ -3583,6 +3595,7 @@ func (r *rpcServer) SubscribeTransactions(req *lnrpc.GetTransactionsRequest,
 				BlockHash:        tx.BlockHash.String(),
 				TimeStamp:        tx.Timestamp,
 				TotalFees:        tx.TotalFees,
+				DestAddresses:    destAddresses,
 				RawTxHex:         hex.EncodeToString(tx.RawTx),
 			}
 			if err := updateStream.Send(detail); err != nil {
@@ -3590,12 +3603,17 @@ func (r *rpcServer) SubscribeTransactions(req *lnrpc.GetTransactionsRequest,
 			}
 
 		case tx := <-txClient.UnconfirmedTransactions():
+			var destAddresses []string
+			for _, destAddress := range tx.DestAddresses {
+				destAddresses = append(destAddresses, destAddress.EncodeAddress())
+			}
 			detail := &lnrpc.Transaction{
-				TxHash:    tx.Hash.String(),
-				Amount:    int64(tx.Value),
-				TimeStamp: tx.Timestamp,
-				TotalFees: tx.TotalFees,
-				RawTxHex:  hex.EncodeToString(tx.RawTx),
+				TxHash:        tx.Hash.String(),
+				Amount:        int64(tx.Value),
+				TimeStamp:     tx.Timestamp,
+				TotalFees:     tx.TotalFees,
+				DestAddresses: destAddresses,
+				RawTxHex:      hex.EncodeToString(tx.RawTx),
 			}
 			if err := updateStream.Send(detail); err != nil {
 				return err
@@ -3752,6 +3770,7 @@ func marshalDbEdge(edgeInfo *channeldb.ChannelEdgeInfo,
 			FeeBaseMsat:      int64(c1.FeeBaseMSat),
 			FeeRateMilliMsat: int64(c1.FeeProportionalMillionths),
 			Disabled:         c1.ChannelFlags&lnwire.ChanUpdateDisabled != 0,
+			LastUpdate:       uint32(c1.LastUpdate.Unix()),
 		}
 	}
 
@@ -3763,6 +3782,7 @@ func marshalDbEdge(edgeInfo *channeldb.ChannelEdgeInfo,
 			FeeBaseMsat:      int64(c2.FeeBaseMSat),
 			FeeRateMilliMsat: int64(c2.FeeProportionalMillionths),
 			Disabled:         c2.ChannelFlags&lnwire.ChanUpdateDisabled != 0,
+			LastUpdate:       uint32(c2.LastUpdate.Unix()),
 		}
 	}
 
@@ -3979,6 +3999,12 @@ func (r *rpcServer) GetNetworkInfo(ctx context.Context,
 		return nil, err
 	}
 
+	// Query the graph for the current number of zombie channels.
+	numZombies, err := graph.NumZombies()
+	if err != nil {
+		return nil, err
+	}
+
 	// Find the median.
 	medianChanSize = autopilot.Median(allChans)
 
@@ -4002,6 +4028,7 @@ func (r *rpcServer) GetNetworkInfo(ctx context.Context,
 		MinChannelSize:       int64(minChannelSize),
 		MaxChannelSize:       int64(maxChannelSize),
 		MedianChannelSizeSat: int64(medianChanSize),
+		NumZombieChans:       numZombies,
 	}
 
 	// Similarly, if we don't have any channels, then we'll also set the
@@ -4203,6 +4230,8 @@ func (r *rpcServer) ListPayments(ctx context.Context,
 			CreationDate:    payment.Info.CreationDate.Unix(),
 			Path:            path,
 			Fee:             int64(route.TotalFees().ToSatoshis()),
+			FeeSat:          int64(route.TotalFees().ToSatoshis()),
+			FeeMsat:         int64(route.TotalFees()),
 			PaymentPreimage: hex.EncodeToString(preimage[:]),
 			PaymentRequest:  string(payment.Info.PaymentRequest),
 			Status:          status,
@@ -4608,14 +4637,19 @@ func (r *rpcServer) ForwardingHistory(ctx context.Context,
 		numEvents uint32
 	)
 
-	// If the start and end time were not set, then we'll just return the
-	// records over the past 24 hours.
-	if req.StartTime == 0 && req.EndTime == 0 {
+	// If the start time wasn't specified, we'll default to 24 hours ago.
+	if req.StartTime == 0 {
 		now := time.Now()
 		startTime = now.Add(-time.Hour * 24)
-		endTime = now
 	} else {
 		startTime = time.Unix(int64(req.StartTime), 0)
+	}
+
+	// If the end time wasn't specified, assume a default end time of now.
+	if req.EndTime == 0 {
+		now := time.Now()
+		endTime = now
+	} else {
 		endTime = time.Unix(int64(req.EndTime), 0)
 	}
 
@@ -4626,7 +4660,7 @@ func (r *rpcServer) ForwardingHistory(ctx context.Context,
 		numEvents = 100
 	}
 
-	// Next, we'll map the proto request into a format the is understood by
+	// Next, we'll map the proto request into a format that is understood by
 	// the forwarding log.
 	eventQuery := channeldb.ForwardingEventQuery{
 		StartTime:    startTime,
