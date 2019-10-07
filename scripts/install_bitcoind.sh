@@ -2,17 +2,17 @@
 
 set -ev
 
-export BITCOIND_VERSION=0.18.0
+export BITCOIND_VERSION=0.15.2
 
-if sudo cp ~/bitcoin/bitcoin-$BITCOIND_VERSION/bin/bitcoind /usr/local/bin/bitcoind
+if sudo cp ~/bitcoin-gold/bitcoin-gold-$BITCOIND_VERSION/bin/bgoldd /usr/local/bin/bgoldd
 then
-        echo "found cached bitcoind"
+        echo "found cached bgoldd"
 else
-        mkdir -p ~/bitcoin && \
-        pushd ~/bitcoin && \
-        wget https://bitcoin.org/bin/bitcoin-core-$BITCOIND_VERSION/bitcoin-$BITCOIND_VERSION-x86_64-linux-gnu.tar.gz && \
-        tar xvfz bitcoin-$BITCOIND_VERSION-x86_64-linux-gnu.tar.gz && \
-        sudo cp ./bitcoin-$BITCOIND_VERSION/bin/bitcoind /usr/local/bin/bitcoind && \
+        mkdir -p ~/bitcoin-gold && \
+        pushd ~/bitcoin-gold && \
+        wget https://github.com/BTCGPU/BTCGPU/releases/download/v$BITCOIND_VERSION/bitcoin-gold-$BITCOIND_VERSION-x86_64-linux-gnu.tar.gz && \
+        tar xvfz bitcoin-gold-$BITCOIND_VERSION-x86_64-linux-gnu.tar.gz && \
+        sudo cp ./bitcoin-gold-$BITCOIND_VERSION/bin/bgoldd /usr/local/bin/bgoldd && \
         popd
 fi
 

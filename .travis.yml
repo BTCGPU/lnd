@@ -1,10 +1,10 @@
 language: go
 cache:
   directories:
-    - ~/bitcoin/bitcoin-0.18.0/bin
+    - ~/bitcoin/bitcoin-0.15.2/bin
     - $GOCACHE
     - $GOPATH/pkg/mod
-    - $GOPATH/src/github.com/btcsuite
+    - $GOPATH/src/github.com/btgsuite
     - $GOPATH/src/github.com/golang
     - $GOPATH/src/gopkg.in/alecthomas
 
