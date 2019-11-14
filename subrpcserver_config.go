@@ -10,6 +10,7 @@ import (
 	"github.com/BTCGPU/lnd/htlcswitch"
 	"github.com/BTCGPU/lnd/invoices"
 	"github.com/BTCGPU/lnd/lnrpc/autopilotrpc"
+	"github.com/BTCGPU/lnd/lncfg"
 	"github.com/BTCGPU/lnd/lnrpc/chainrpc"
 	"github.com/BTCGPU/lnd/lnrpc/invoicesrpc"
 	"github.com/BTCGPU/lnd/lnrpc/routerrpc"
@@ -18,9 +19,11 @@ import (
 	"github.com/BTCGPU/lnd/macaroons"
 	"github.com/BTCGPU/lnd/lnrpc/watchtowerrpc"
 	"github.com/BTCGPU/lnd/netann"
+	"github.com/BTCGPU/lnd/lnrpc/wtclientrpc"
 	"github.com/BTCGPU/lnd/routing"
 	"github.com/BTCGPU/lnd/sweep"
 	"github.com/BTCGPU/lnd/watchtower"
+	"github.com/BTCGPU/lnd/watchtower/wtclient"
 )
 
 // subRPCServerConfigs is special sub-config in the main configuration that
@@ -62,6 +65,12 @@ type subRPCServerConfigs struct {
 	// WatchtowerRPC is a sub-RPC server that exposes functionality allowing
 	// clients to monitor and control their embedded watchtower.
 	WatchtowerRPC *watchtowerrpc.Config `group:"watchtowerrpc" namespace:"watchtowerrpc"`
+
+	// WatchtowerClientRPC is a sub-RPC server that exposes functionality
+	// that allows clients to interact with the active watchtower client
+	// instance within lnd in order to add, remove, list registered client
+	// towers, etc.
+	WatchtowerClientRPC *wtclientrpc.Config `group:"wtclientrpc" namespace:"wtclientrpc"`
 }
 
 // PopulateDependencies attempts to iterate through all the sub-server configs
@@ -81,7 +90,9 @@ func (s *subRPCServerConfigs) PopulateDependencies(cc *chainControl,
 	nodeSigner *netann.NodeSigner,
 	chanDB *channeldb.DB,
 	sweeper *sweep.UtxoSweeper,
-	tower *watchtower.Standalone) error {
+	tower *watchtower.Standalone,
+	towerClient wtclient.Client,
+	tcpResolver lncfg.TCPResolver) error {
 
 	// First, we'll use reflect to obtain a version of the config struct
 	// that allows us to programmatically inspect its fields.
@@ -140,6 +151,9 @@ func (s *subRPCServerConfigs) PopulateDependencies(cc *chainControl,
 			)
 			subCfgValue.FieldByName("Sweeper").Set(
 				reflect.ValueOf(sweeper),
+			)
+			subCfgValue.FieldByName("Chain").Set(
+				reflect.ValueOf(cc.chainIO),
 			)
 
 		case *autopilotrpc.Config:
@@ -221,6 +235,21 @@ func (s *subRPCServerConfigs) PopulateDependencies(cc *chainControl,
 			)
 			subCfgValue.FieldByName("Tower").Set(
 				reflect.ValueOf(tower),
+			)
+
+		case *wtclientrpc.Config:
+			subCfgValue := extractReflectValue(subCfg)
+
+			if towerClient != nil {
+				subCfgValue.FieldByName("Active").Set(
+					reflect.ValueOf(towerClient != nil),
+				)
+				subCfgValue.FieldByName("Client").Set(
+					reflect.ValueOf(towerClient),
+				)
+			}
+			subCfgValue.FieldByName("Resolver").Set(
+				reflect.ValueOf(tcpResolver),
 			)
 
 		default:

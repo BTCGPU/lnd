@@ -9,10 +9,10 @@ import (
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
 
-	"github.com/btgsuite/btgwallet/chain"
-	"github.com/btgsuite/btgwallet/waddrmgr"
-	"github.com/BTCGPU/neutrino"
 	"github.com/BTCGPU/lnd/lnwallet"
+	"github.com/BTCGPU/neutrino"
+	"github.com/BTCGPU/neutrino/headerfs"
+	"github.com/btgsuite/btgwallet/chain"
 )
 
 var (
@@ -48,7 +48,7 @@ func (b *BtcWallet) GetUtxo(op *wire.OutPoint, pkScript []byte,
 				OutPoint: *op,
 				PkScript: pkScript,
 			}),
-			neutrino.StartBlock(&waddrmgr.BlockStamp{
+			neutrino.StartBlock(&headerfs.BlockStamp{
 				Height: int32(heightHint),
 			}),
 			neutrino.QuitChan(cancel),

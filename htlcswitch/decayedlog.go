@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/coreos/bbolt"
-	"github.com/BTCGPU/lightning-onion"
+	sphinx "github.com/BTCGPU/lightning-onion"
 	"github.com/BTCGPU/lnd/chainntnfs"
 )
 
@@ -237,7 +237,7 @@ func (d *DecayedLog) gcExpiredHashes(height uint32) (uint32, error) {
 		return nil
 	})
 	if err != nil {
-		return 0, nil
+		return 0, err
 	}
 
 	return numExpiredHashes, nil

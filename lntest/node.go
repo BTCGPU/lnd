@@ -2,6 +2,7 @@ package lntest
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -27,10 +28,11 @@ import (
 	"github.com/BTCGPU/lnd/lnrpc/routerrpc"
 	"github.com/BTCGPU/lnd/lnrpc/walletrpc"
 	"github.com/BTCGPU/lnd/lnrpc/watchtowerrpc"
-	"golang.org/x/net/context"
+	"github.com/BTCGPU/lnd/lnrpc/wtclientrpc"
+	"github.com/BTCGPU/lnd/lntest/wait"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	macaroon "gopkg.in/macaroon.v2"
+	"gopkg.in/macaroon.v2"
 )
 
 const (
@@ -265,7 +267,8 @@ type HarnessNode struct {
 	// because a name collision would occur with LightningClient.
 	RouterClient     routerrpc.RouterClient
 	WalletKitClient  walletrpc.WalletKitClient
-	WatchtowerClient watchtowerrpc.WatchtowerClient
+	Watchtower       watchtowerrpc.WatchtowerClient
+	WatchtowerClient wtclientrpc.WatchtowerClientClient
 }
 
 // Assert *HarnessNode implements the lnrpc.LightningClient interface.
@@ -466,7 +469,7 @@ func (hn *HarnessNode) initClientWhenReady() error {
 		conn    *grpc.ClientConn
 		connErr error
 	)
-	if err := WaitNoError(func() error {
+	if err := wait.NoError(func() error {
 		conn, connErr = hn.ConnectRPC(true)
 		return connErr
 	}, 5*time.Second); err != nil {
@@ -526,7 +529,8 @@ func (hn *HarnessNode) initLightningClient(conn *grpc.ClientConn) error {
 	hn.InvoicesClient = invoicesrpc.NewInvoicesClient(conn)
 	hn.RouterClient = routerrpc.NewRouterClient(conn)
 	hn.WalletKitClient = walletrpc.NewWalletKitClient(conn)
-	hn.WatchtowerClient = watchtowerrpc.NewWatchtowerClient(conn)
+	hn.Watchtower = watchtowerrpc.NewWatchtowerClient(conn)
+	hn.WatchtowerClient = wtclientrpc.NewWatchtowerClientClient(conn)
 
 	// Set the harness node's pubkey to what the node claims in GetInfo.
 	err := hn.FetchNodeInfo()
@@ -540,7 +544,7 @@ func (hn *HarnessNode) initLightningClient(conn *grpc.ClientConn) error {
 	// until then, we'll create a dummy subscription to ensure we can do so
 	// successfully before proceeding. We use a dummy subscription in order
 	// to not consume an update from the real one.
-	err = WaitNoError(func() error {
+	err = wait.NoError(func() error {
 		req := &lnrpc.GraphTopologySubscription{}
 		ctx, cancelFunc := context.WithCancel(context.Background())
 		topologyClient, err := hn.SubscribeChannelGraph(ctx, req)
@@ -729,6 +733,7 @@ func (hn *HarnessNode) stop() error {
 	hn.processExit = nil
 	hn.LightningClient = nil
 	hn.WalletUnlockerClient = nil
+	hn.Watchtower = nil
 	hn.WatchtowerClient = nil
 	return nil
 }
@@ -1060,7 +1065,7 @@ func (hn *HarnessNode) WaitForBalance(expectedBalance btcutil.Amount, confirmed 
 		return btcutil.Amount(balance.UnconfirmedBalance) == expectedBalance
 	}
 
-	err := WaitPredicate(doesBalanceMatch, 30*time.Second)
+	err := wait.Predicate(doesBalanceMatch, 30*time.Second)
 	if err != nil {
 		return fmt.Errorf("balances not synced after deadline: "+
 			"expected %v, only have %v", expectedBalance, lastBalance)

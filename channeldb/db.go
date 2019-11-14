@@ -103,6 +103,18 @@ var (
 			number:    9,
 			migration: migrateOutgoingPayments,
 		},
+		{
+			// The DB version where we started to store legacy
+			// payload information for all routes, as well as the
+			// optional TLV records.
+			number:    10,
+			migration: migrateRouteSerialization,
+		},
+		{
+			// Add invoice htlc and cltv delta fields.
+			number:    11,
+			migration: migrateInvoices,
+		},
 	}
 
 	// Big endian is the preferred byte order, due to cursor scans over
@@ -117,6 +129,7 @@ type DB struct {
 	*bbolt.DB
 	dbPath string
 	graph  *ChannelGraph
+	now    func() time.Time
 }
 
 // Open opens an existing channeldb. Any necessary schemas migrations due to
@@ -135,7 +148,14 @@ func Open(dbPath string, modifiers ...OptionModifier) (*DB, error) {
 		modifier(&opts)
 	}
 
-	bdb, err := bbolt.Open(path, dbFilePermission, nil)
+	// Specify bbolt freelist options to reduce heap pressure in case the
+	// freelist grows to be very large.
+	options := &bbolt.Options{
+		NoFreelistSync: opts.NoFreelistSync,
+		FreelistType:   bbolt.FreelistMapType,
+	}
+
+	bdb, err := bbolt.Open(path, dbFilePermission, options)
 	if err != nil {
 		return nil, err
 	}
@@ -143,6 +163,7 @@ func Open(dbPath string, modifiers ...OptionModifier) (*DB, error) {
 	chanDB := &DB{
 		DB:     bdb,
 		dbPath: dbPath,
+		now:    time.Now,
 	}
 	chanDB.graph = newChannelGraph(
 		chanDB, opts.RejectCacheSize, opts.ChannelCacheSize,

@@ -15,10 +15,6 @@ import (
 	"github.com/BTCGPU/lnd/watchtower/wtwire"
 )
 
-// retryInterval is the default duration we will wait between attempting to
-// connect back out to a tower if the prior state update failed.
-const retryInterval = 2 * time.Second
-
 // reserveStatus is an enum that signals how full a particular session is.
 type reserveStatus uint8
 
@@ -145,9 +141,6 @@ func newSessionQueue(cfg *sessionQueueConfig) *sessionQueue {
 // backups.
 func (q *sessionQueue) Start() {
 	q.started.Do(func() {
-		// TODO(conner): load prior committed state updates from disk an
-		// populate in queue.
-
 		go q.sessionManager()
 	})
 }

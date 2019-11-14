@@ -1,7 +1,7 @@
 DEV_TAGS = dev
 LOG_TAGS =
 TEST_FLAGS =
-COVER_PKG = $$(go list ./... | grep -v lnrpc)
+COVER_PKG = $$(go list -deps ./... | grep '$(PKG)' | grep -v lnrpc)
 
 # If specific package is being unit tested, construct the full name of the
 # subpackage.
@@ -56,7 +56,7 @@ endif
 
 
 # Construct the integration test command with the added build flags.
-ITEST_TAGS := $(DEV_TAGS) rpctest chainrpc walletrpc signrpc invoicesrpc autopilotrpc routerrpc watchtowerrpc
+ITEST_TAGS := $(DEV_TAGS) rpctest chainrpc walletrpc signrpc invoicesrpc autopilotrpc routerrpc watchtowerrpc wtclientrpc
 
 # Default to btcd backend if not set.
 ifneq ($(backend),)

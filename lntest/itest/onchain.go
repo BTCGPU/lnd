@@ -13,6 +13,7 @@ import (
 	"github.com/BTCGPU/lnd/lnrpc/walletrpc"
 	"github.com/BTCGPU/lnd/lntest"
 	"github.com/BTCGPU/lnd/sweep"
+	"github.com/BTCGPU/lnd/lntest/wait"
 )
 
 // testCPFP ensures that the daemon can bump an unconfirmed  transaction's fee
@@ -140,7 +141,7 @@ func testCPFP(net *lntest.NetworkHarness, t *harnessTest) {
 	mineBlocks(t, net, 1, 2)
 
 	// The input used to CPFP should no longer be pending.
-	err = lntest.WaitNoError(func() error {
+	err = wait.NoError(func() error {
 		req := &walletrpc.PendingSweepsRequest{}
 		ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 		resp, err := net.Bob.WalletKitClient.PendingSweeps(ctxt, req)

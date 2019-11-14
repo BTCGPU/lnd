@@ -10,6 +10,7 @@ import (
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/routing"
 	"github.com/BTCGPU/lnd/routing/route"
+	"github.com/BTCGPU/lnd/tlv"
 
 	"github.com/BTCGPU/lnd/lnrpc"
 )
@@ -23,6 +24,10 @@ const (
 
 var (
 	sourceKey = route.Vertex{1, 2, 3}
+
+	node1 = route.Vertex{10}
+
+	node2 = route.Vertex{11}
 )
 
 // TestQueryRoutes asserts that query routes rpc parameters are properly parsed
@@ -50,11 +55,6 @@ func testQueryRoutes(t *testing.T, useMissionControl bool) {
 		t.Fatal(err)
 	}
 
-	ignoredEdge := routing.EdgeLocator{
-		ChannelID: 555,
-		Direction: 1,
-	}
-
 	request := &lnrpc.QueryRoutesRequest{
 		PubKey:         destKey,
 		Amt:            100000,
@@ -69,11 +69,16 @@ func testQueryRoutes(t *testing.T, useMissionControl bool) {
 			ChannelId:        555,
 			DirectionReverse: true,
 		}},
+		IgnoredPairs: []*lnrpc.NodePair{{
+			From: node1[:],
+			To:   node2[:],
+		}},
 		UseMissionControl: useMissionControl,
 	}
 
 	findRoute := func(source, target route.Vertex,
 		amt lnwire.MilliSatoshi, restrictions *routing.RestrictParams,
+		_ []tlv.Record,
 		finalExpiry ...uint16) (*route.Route, error) {
 
 		if int64(amt) != request.Amt*1000 {
@@ -92,24 +97,28 @@ func testQueryRoutes(t *testing.T, useMissionControl bool) {
 			t.Fatal("unexpected fee limit")
 		}
 
-		if restrictions.ProbabilitySource(route.Vertex{},
-			ignoredEdge, 0,
+		if restrictions.ProbabilitySource(route.Vertex{2},
+			route.Vertex{1}, 0,
 		) != 0 {
 			t.Fatal("expecting 0% probability for ignored edge")
 		}
 
 		if restrictions.ProbabilitySource(ignoreNodeVertex,
-			routing.EdgeLocator{}, 0,
+			route.Vertex{6}, 0,
 		) != 0 {
 			t.Fatal("expecting 0% probability for ignored node")
+		}
+
+		if restrictions.ProbabilitySource(node1, node2, 0) != 0 {
+			t.Fatal("expecting 0% probability for ignored pair")
 		}
 
 		expectedProb := 1.0
 		if useMissionControl {
 			expectedProb = testMissionControlProb
 		}
-		if restrictions.ProbabilitySource(route.Vertex{},
-			routing.EdgeLocator{}, 0,
+		if restrictions.ProbabilitySource(route.Vertex{4},
+			route.Vertex{5}, 0,
 		) != expectedProb {
 			t.Fatal("expecting 100% probability")
 		}
@@ -128,6 +137,16 @@ func testQueryRoutes(t *testing.T, useMissionControl bool) {
 			return 1, nil
 		},
 		MissionControl: &mockMissionControl{},
+		FetchChannelEndpoints: func(chanID uint64) (route.Vertex,
+			route.Vertex, error) {
+
+			if chanID != 555 {
+				t.Fatal("expected endpoints to be fetched for "+
+					"channel 555, but got %v instead",
+					chanID)
+			}
+			return route.Vertex{1}, route.Vertex{2}, nil
+		},
 	}
 
 	resp, err := backend.QueryRoutes(context.Background(), request)
@@ -142,12 +161,15 @@ func testQueryRoutes(t *testing.T, useMissionControl bool) {
 type mockMissionControl struct {
 }
 
-func (m *mockMissionControl) GetEdgeProbability(fromNode route.Vertex,
-	edge routing.EdgeLocator, amt lnwire.MilliSatoshi) float64 {
+func (m *mockMissionControl) GetProbability(fromNode, toNode route.Vertex,
+	amt lnwire.MilliSatoshi) float64 {
+
 	return testMissionControlProb
 }
 
-func (m *mockMissionControl) ResetHistory() {}
+func (m *mockMissionControl) ResetHistory() error {
+	return nil
+}
 
 func (m *mockMissionControl) GetHistorySnapshot() *routing.MissionControlSnapshot {
 	return nil
