@@ -7,9 +7,9 @@ import (
 	"encoding/hex"
 	"sync/atomic"
 
-	"github.com/btgsuite/btgd/btcec"
 	"github.com/BTCGPU/lnd/autopilot"
 	"github.com/BTCGPU/lnd/lnrpc"
+	"github.com/btgsuite/btgd/btcec"
 	"google.golang.org/grpc"
 	"gopkg.in/macaroon-bakery.v2/bakery"
 )

@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/wire"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/netann"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/wire"
 )
 
 // randOutpoint creates a random wire.Outpoint.

@@ -5,8 +5,8 @@ import (
 	"io"
 
 	"github.com/BTCGPU/lnd/channeldb"
-	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/htlcswitch/hop"
+	"github.com/BTCGPU/lnd/lnwire"
 )
 
 // EmptyCircuitKey is a default value for an outgoing circuit key returned when

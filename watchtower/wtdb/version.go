@@ -1,8 +1,8 @@
 package wtdb
 
 import (
-	"github.com/coreos/bbolt"
 	"github.com/BTCGPU/lnd/channeldb"
+	"github.com/coreos/bbolt"
 )
 
 // migration is a function which takes a prior outdated version of the database

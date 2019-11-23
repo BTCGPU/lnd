@@ -3,9 +3,9 @@ package sweep
 import (
 	"sync"
 
+	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/btgsuite/btgd/wire"
-	"github.com/BTCGPU/lnd/lnwallet"
 )
 
 // mockBackend simulates a chain backend for realistic behaviour in unit tests

@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/lntypes"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/davecgh/go-spew/spew"
 )
 
 // TestNetworkResultSerialization checks that NetworkResults are properly

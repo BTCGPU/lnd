@@ -3,10 +3,10 @@ package discovery
 import (
 	"time"
 
-	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/routing/route"
+	"github.com/btgsuite/btgd/chaincfg/chainhash"
 )
 
 // ChannelGraphTimeSeries is an interface that provides time and block based

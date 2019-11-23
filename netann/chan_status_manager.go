@@ -5,11 +5,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/wire"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/wire"
 )
 
 var (

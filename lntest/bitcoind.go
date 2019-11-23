@@ -41,13 +41,13 @@ var _ BackendConfig = (*BitcoindBackendConfig)(nil)
 // using this node as a chain backend.
 func (b BitcoindBackendConfig) GenArgs() []string {
 	var args []string
-	args = append(args, "--bitcoin.node=bitcoind")
-	args = append(args, fmt.Sprintf("--bitcoind.rpchost=%v", b.rpcHost))
-	args = append(args, fmt.Sprintf("--bitcoind.rpcuser=%v", b.rpcUser))
-	args = append(args, fmt.Sprintf("--bitcoind.rpcpass=%v", b.rpcPass))
-	args = append(args, fmt.Sprintf("--bitcoind.zmqpubrawblock=%v",
+	args = append(args, "--bitcoingold.node=bgoldd")
+	args = append(args, fmt.Sprintf("--bitcoingold.rpchost=%v", b.rpcHost))
+	args = append(args, fmt.Sprintf("--bitcoingold.rpcuser=%v", b.rpcUser))
+	args = append(args, fmt.Sprintf("--bitcoingold.rpcpass=%v", b.rpcPass))
+	args = append(args, fmt.Sprintf("--bitcoingold.zmqpubrawblock=%v",
 		b.zmqBlockPath))
-	args = append(args, fmt.Sprintf("--bitcoind.zmqpubrawtx=%v",
+	args = append(args, fmt.Sprintf("--bitcoingold.zmqpubrawtx=%v",
 		b.zmqTxPath))
 
 	return args
@@ -65,7 +65,7 @@ func (b BitcoindBackendConfig) DisconnectMiner() error {
 
 // Name returns the name of the backend type.
 func (b BitcoindBackendConfig) Name() string {
-	return "bitcoind"
+	return "bgoldd"
 }
 
 // NewBackend starts a bitcoind node and returns a BitoindBackendConfig for
@@ -81,12 +81,12 @@ func NewBackend(miner string, netParams *chaincfg.Params) (
 		return nil, nil, err
 	}
 
-	logFile, err := filepath.Abs(logDir + "/bitcoind.log")
+	logFile, err := filepath.Abs(logDir + "/bgoldd.log")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	tempBitcoindDir, err := ioutil.TempDir("", "bitcoind")
+	tempBitcoindDir, err := ioutil.TempDir("", "bgoldd")
 	if err != nil {
 		return nil, nil,
 			fmt.Errorf("unable to create temp directory: %v", err)
@@ -98,7 +98,7 @@ func NewBackend(miner string, netParams *chaincfg.Params) (
 	p2pPort := rand.Int()%(65536-1024) + 1024
 
 	bitcoind := exec.Command(
-		"bitcoind",
+		"bgoldd",
 		"-datadir="+tempBitcoindDir,
 		"-debug",
 		"-regtest",

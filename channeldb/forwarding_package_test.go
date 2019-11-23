@@ -7,10 +7,10 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/btgsuite/btgd/wire"
-	"github.com/coreos/bbolt"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/btgsuite/btgd/wire"
+	"github.com/coreos/bbolt"
 )
 
 // TestPkgFilterBruteForce tests the behavior of a pkg filter up to size 1000,

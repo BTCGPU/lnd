@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/btgsuite/btgd/btcec"
 	"github.com/BTCGPU/lnd/lnwire"
-	"github.com/BTCGPU/lnd/watchtower/wtpolicy"
 	"github.com/BTCGPU/lnd/watchtower/blob"
+	"github.com/BTCGPU/lnd/watchtower/wtpolicy"
+	"github.com/btgsuite/btgd/btcec"
 )
 
 // CSessionStatus is a bit-field representing the possible statuses of

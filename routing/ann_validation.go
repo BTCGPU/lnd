@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-errors/errors"
-	"github.com/BTCGPU/lnd/lnwire"
 )
 
 // ValidateChannelAnn validates the channel announcement message and checks

@@ -1,11 +1,11 @@
 package discovery
 
 import (
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/go-errors/errors"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/go-errors/errors"
 )
 
 // CreateChanAnnouncement is a helper function which creates all channel

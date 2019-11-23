@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/btgsuite/btgd/wire"
-	btcutil "github.com/btgsuite/btgutil"
 	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/BTCGPU/lnd/watchtower/blob"
+	"github.com/btgsuite/btgd/wire"
+	btcutil "github.com/btgsuite/btgutil"
 )
 
 const (

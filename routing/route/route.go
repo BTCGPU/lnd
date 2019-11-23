@@ -9,11 +9,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/btgsuite/btgd/btcec"
 	sphinx "github.com/BTCGPU/lightning-onion"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/record"
 	"github.com/BTCGPU/lnd/tlv"
+	"github.com/btgsuite/btgd/btcec"
 )
 
 // VertexSize is the size of the array to store a vertex.

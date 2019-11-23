@@ -8,8 +8,8 @@ import (
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/invoices"
 
-	btcutil "github.com/btgsuite/btgutil"
 	"github.com/BTCGPU/lnd/lntypes"
+	btcutil "github.com/btgsuite/btgutil"
 )
 
 // htlcIncomingContestResolver is a ContractResolver that's able to resolve an

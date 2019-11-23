@@ -668,7 +668,6 @@ func (i *InvoiceRegistry) CancelInvoice(payHash lntypes.Hash) error {
 		)
 		for key, htlc := range invoice.Htlcs {
 			switch htlc.State {
-
 			// If we get here, there shouldn't be any settled htlcs.
 			case channeldb.HtlcStateSettled:
 				return nil, errors.New("cannot cancel " +
@@ -1013,7 +1012,6 @@ func (i *InvoiceRegistry) notifyHodlSubscribers(hodlEvent HodlEvent) {
 // hodlSubscribe adds a new invoice subscription.
 func (i *InvoiceRegistry) hodlSubscribe(subscriber chan<- interface{},
 	circuitKey channeldb.CircuitKey) {
-
 	log.Debugf("Hodl subscribe for %v", circuitKey)
 
 	subscriptions, ok := i.hodlSubscriptions[circuitKey]

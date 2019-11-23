@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/BTCGPU/lnd/input"
 	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/BTCGPU/lnd/lnwire"
@@ -17,6 +15,8 @@ import (
 	"github.com/BTCGPU/lnd/watchtower/wtpolicy"
 	"github.com/BTCGPU/lnd/watchtower/wtserver"
 	"github.com/BTCGPU/lnd/watchtower/wtwire"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/chaincfg/chainhash"
 )
 
 const (
@@ -567,7 +567,6 @@ func (c *TowerClient) RegisterChannel(chanID lnwire.ChannelID) error {
 //    rate.
 func (c *TowerClient) BackupState(chanID *lnwire.ChannelID,
 	breachInfo *lnwallet.BreachRetribution, isTweakless bool) error {
-
 	// Retrieve the cached sweep pkscript used for this channel.
 	c.backupMu.Lock()
 	summary, ok := c.summaries[*chanID]

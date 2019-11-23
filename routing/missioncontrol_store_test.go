@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/davecgh/go-spew/spew"
 
-	"github.com/coreos/bbolt"
 	"github.com/BTCGPU/lnd/routing/route"
+	"github.com/coreos/bbolt"
 )
 
 const testMaxRecords = 2

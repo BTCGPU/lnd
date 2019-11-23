@@ -8,14 +8,14 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/chaincfg/chainhash"
-	"github.com/btgsuite/btgd/wire"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/keychain"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/shachain"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/chaincfg/chainhash"
+	"github.com/btgsuite/btgd/wire"
+	"github.com/davecgh/go-spew/spew"
 )
 
 var (

@@ -15,15 +15,15 @@ import (
 
 	"google.golang.org/grpc/grpclog"
 
+	"github.com/BTCGPU/lnd/lnrpc"
+	"github.com/BTCGPU/lnd/lntest/wait"
+	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/btgsuite/btgd/chaincfg"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/btgsuite/btgd/integration/rpctest"
 	"github.com/btgsuite/btgd/txscript"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
-	"github.com/BTCGPU/lnd/lnrpc"
-	"github.com/BTCGPU/lnd/lnwire"
-	"github.com/BTCGPU/lnd/lntest/wait"
 )
 
 // DefaultCSV is the CSV delay (remotedelay) we will start our test nodes with.
@@ -442,7 +442,6 @@ func (n *NetworkHarness) EnsureConnected(ctx context.Context, a, b *HarnessNode)
 
 			err := n.connect(ctx, req, a)
 			switch {
-
 			// Request was successful, wait for both to display the
 			// connection.
 			case err == nil:
@@ -461,7 +460,6 @@ func (n *NetworkHarness) EnsureConnected(ctx context.Context, a, b *HarnessNode)
 				predErr = err
 				return false
 			}
-
 		}, DefaultTimeout)
 		if err != nil {
 			return fmt.Errorf("connection not succeeded within 15 "+

@@ -5,11 +5,11 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/davecgh/go-spew/spew"
 	sphinx "github.com/BTCGPU/lightning-onion"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/record"
 	"github.com/BTCGPU/lnd/tlv"
+	"github.com/davecgh/go-spew/spew"
 )
 
 // TestSphinxHopIteratorForwardingInstructions tests that we're able to

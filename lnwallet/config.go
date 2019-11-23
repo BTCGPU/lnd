@@ -1,11 +1,11 @@
 package lnwallet
 
 import (
-	"github.com/btgsuite/btgd/chaincfg"
 	"github.com/BTCGPU/lnd/chainntnfs"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/input"
 	"github.com/BTCGPU/lnd/keychain"
+	"github.com/btgsuite/btgd/chaincfg"
 )
 
 // Config is a struct which houses configuration parameters which modify the

@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/chaincfg/chainhash"
-	"github.com/btgsuite/btgd/wire"
 	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/watchtower/blob"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/chaincfg/chainhash"
+	"github.com/btgsuite/btgd/wire"
 )
 
 // WriteElement is a one-stop shop to write the big endian representation of

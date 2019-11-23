@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BTCGPU/lnd/lntypes"
+	"github.com/BTCGPU/lnd/routing/route"
 	"github.com/btcsuite/fastsha256"
 	"github.com/coreos/bbolt"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/BTCGPU/lnd/lntypes"
-	"github.com/BTCGPU/lnd/routing/route"
 )
 
 func initDB() (*DB, error) {

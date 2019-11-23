@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"errors"
 
-	bolt "github.com/coreos/bbolt"
 	"github.com/BTCGPU/lnd/channeldb"
+	bolt "github.com/coreos/bbolt"
 )
 
 var (

@@ -5,9 +5,9 @@ import (
 	"net"
 	"testing"
 
+	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/wire"
-	"github.com/BTCGPU/lnd/channeldb"
 )
 
 type mockChannelSource struct {

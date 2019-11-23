@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/btgsuite/btgd/wire"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/discovery"
 	"github.com/BTCGPU/lnd/htlcswitch"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/routing"
+	"github.com/btgsuite/btgd/wire"
 )
 
 // Manager manages the node's local channels. The only operation that is
@@ -46,7 +46,6 @@ type Manager struct {
 // active links.
 func (r *Manager) UpdatePolicy(newSchema routing.ChannelPolicy,
 	chanPoints ...wire.OutPoint) error {
-
 	r.policyUpdateLock.Lock()
 	defer r.policyUpdateLock.Unlock()
 
@@ -68,7 +67,6 @@ func (r *Manager) UpdatePolicy(newSchema routing.ChannelPolicy,
 	err := r.ForAllOutgoingChannels(func(
 		info *channeldb.ChannelEdgeInfo,
 		edge *channeldb.ChannelEdgePolicy) error {
-
 		// If we have a channel filter, and this channel isn't a part
 		// of it, then we'll skip it.
 		_, ok := chansToUpdate[info.ChannelPoint]
@@ -123,7 +121,6 @@ func (r *Manager) UpdatePolicy(newSchema routing.ChannelPolicy,
 func (r *Manager) updateEdge(chanPoint wire.OutPoint,
 	edge *channeldb.ChannelEdgePolicy,
 	newSchema routing.ChannelPolicy) error {
-
 	// Update forwarding fee scheme and required time lock delta.
 	edge.FeeBaseMSat = newSchema.BaseFee
 	edge.FeeProportionalMillionths = lnwire.MilliSatoshi(
@@ -139,7 +136,6 @@ func (r *Manager) updateEdge(chanPoint wire.OutPoint,
 
 	// We now update the edge max htlc value.
 	switch {
-
 	// If a non-zero max htlc was specified, use it to update the edge.
 	// Otherwise keep the value unchanged.
 	case newSchema.MaxHTLC != 0:
@@ -188,7 +184,6 @@ func (r *Manager) updateEdge(chanPoint wire.OutPoint,
 // constraints.
 func (r *Manager) getHtlcAmtLimits(chanPoint wire.OutPoint) (
 	lnwire.MilliSatoshi, lnwire.MilliSatoshi, error) {
-
 	ch, err := r.FetchChannel(chanPoint)
 	if err != nil {
 		return 0, 0, err

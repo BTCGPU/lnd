@@ -92,7 +92,6 @@ var (
 // channels will use the new format, otherwise the legacy format.
 func CreateTestChannels(tweaklessCommits bool) (
 	*LightningChannel, *LightningChannel, func(), error) {
-
 	channelCapacity, err := btcutil.NewAmount(10)
 	if err != nil {
 		return nil, nil, nil, err

@@ -13,6 +13,7 @@ import (
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/input"
 	"github.com/BTCGPU/lnd/keychain"
+	"github.com/BTCGPU/lnd/lnwallet/chanvalidate"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/shachain"
 	"github.com/btgsuite/btgd/blockchain"
@@ -23,7 +24,6 @@ import (
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/btgsuite/btgutil/txsort"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/BTCGPU/lnd/lnwallet/chanvalidate"
 )
 
 const (
@@ -663,7 +663,6 @@ func CreateCommitmentTxns(localBalance, remoteBalance btcutil.Amount,
 	localCommitPoint, remoteCommitPoint *btcec.PublicKey,
 	fundingTxIn wire.TxIn,
 	tweaklessCommit bool) (*wire.MsgTx, *wire.MsgTx, error) {
-
 	localCommitmentKeys := DeriveCommitmentKeys(
 		localCommitPoint, true, tweaklessCommit, ourChanCfg,
 		theirChanCfg,
@@ -1643,7 +1642,6 @@ func coinSelectSubtractFees(feeRate SatPerKWeight, amt,
 // an error, then the mined channel is invalid, and shouldn't be used.
 func (l *LightningWallet) ValidateChannel(channelState *channeldb.OpenChannel,
 	fundingTx *wire.MsgTx) error {
-
 	// First, we'll obtain a fully signed commitment transaction so we can
 	// pass into it on the chanvalidate package for verification.
 	channel, err := NewLightningChannel(l.Cfg.Signer, channelState, nil)

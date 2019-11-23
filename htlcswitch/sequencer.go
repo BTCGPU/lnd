@@ -3,9 +3,9 @@ package htlcswitch
 import (
 	"sync"
 
+	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/coreos/bbolt"
 	"github.com/go-errors/errors"
-	"github.com/BTCGPU/lnd/channeldb"
 )
 
 // defaultSequenceBatchSize specifies the window of sequence numbers that are

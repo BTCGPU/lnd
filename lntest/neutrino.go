@@ -22,7 +22,7 @@ var _ BackendConfig = (*NeutrinoBackendConfig)(nil)
 // using this node as a chain backend.
 func (b NeutrinoBackendConfig) GenArgs() []string {
 	var args []string
-	args = append(args, "--bitcoin.node=neutrino")
+	args = append(args, "--bitcoingold.node=neutrino")
 	args = append(args, "--neutrino.connect="+b.minerAddr)
 	return args
 }

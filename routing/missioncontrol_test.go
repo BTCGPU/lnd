@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/BTCGPU/lnd/lnwire"
-	"github.com/coreos/bbolt"
 	"github.com/BTCGPU/lnd/routing/route"
+	"github.com/coreos/bbolt"
 )
 
 var (

@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/coreos/bbolt"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/coreos/bbolt"
 )
 
 var (

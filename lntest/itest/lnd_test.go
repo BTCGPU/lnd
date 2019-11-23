@@ -27,7 +27,9 @@ import (
 	"github.com/BTCGPU/lnd/lnrpc/invoicesrpc"
 	"github.com/BTCGPU/lnd/lnrpc/routerrpc"
 	"github.com/BTCGPU/lnd/lnrpc/watchtowerrpc"
+	"github.com/BTCGPU/lnd/lnrpc/wtclientrpc"
 	"github.com/BTCGPU/lnd/lntest"
+	"github.com/BTCGPU/lnd/lntest/wait"
 	"github.com/BTCGPU/lnd/lntypes"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/routing"
@@ -40,8 +42,6 @@ import (
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-errors/errors"
-	"github.com/BTCGPU/lnd/lnrpc/wtclientrpc"
-	"github.com/BTCGPU/lnd/lntest/wait"
 )
 
 var (
@@ -14584,9 +14584,9 @@ func TestLightningNetworkDaemon(t *testing.T) {
 		// After shutting down the miner, we'll make a copy of the log
 		// file before deleting the temporary log dir.
 		logFile := fmt.Sprintf(
-			"%s/%s/btcd.log", minerLogDir, harnessNetParams.Name,
+			"%s/%s/btgd.log", minerLogDir, harnessNetParams.Name,
 		)
-		err := lntest.CopyFile("./output_btcd_miner.log", logFile)
+		err := lntest.CopyFile("./output_btgd_miner.log", logFile)
 		if err != nil {
 			fmt.Printf("unable to copy file: %v\n", err)
 		}

@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btgsuite/btgd/btcec"
 	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/netann"
 	"github.com/BTCGPU/lnd/routing"
+	"github.com/btgsuite/btgd/btcec"
 )
 
 type mockSigner struct {

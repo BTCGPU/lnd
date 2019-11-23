@@ -10,9 +10,9 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/BTCGPU/lnd/tor"
 	"github.com/BTCGPU/lnd/watchtower/wtdb"
 	"github.com/btgsuite/btgd/btcec"
-	"github.com/BTCGPU/lnd/tor"
 )
 
 func randPubKey() (*btcec.PublicKey, error) {

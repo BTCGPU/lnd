@@ -7,17 +7,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/BTCGPU/lnd/chainntnfs"
+	"github.com/BTCGPU/lnd/channeldb"
+	"github.com/BTCGPU/lnd/input"
+	"github.com/BTCGPU/lnd/lnwallet"
+	"github.com/BTCGPU/lnd/shachain"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/chaincfg"
 	"github.com/btgsuite/btgd/txscript"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/BTCGPU/lnd/chainntnfs"
-	"github.com/BTCGPU/lnd/channeldb"
-	"github.com/BTCGPU/lnd/input"
-	"github.com/BTCGPU/lnd/lnwallet"
-	"github.com/BTCGPU/lnd/shachain"
 )
 
 const (
@@ -332,7 +332,6 @@ func (c *chainWatcher) SubscribeChannelEvents() *ChainEventSubscription {
 func isOurCommitment(localChanCfg, remoteChanCfg channeldb.ChannelConfig,
 	commitSpend *chainntnfs.SpendDetail, broadcastStateNum uint64,
 	revocationProducer shachain.Producer, tweakless bool) (bool, error) {
-
 	// First, we'll re-derive our commitment point for this state since
 	// this is what we use to randomize each of the keys for this state.
 	commitSecret, err := revocationProducer.AtIndex(broadcastStateNum)
@@ -607,7 +606,6 @@ func (c *chainWatcher) closeObserver(spendNtfn *chainntnfs.SpendEvent) {
 					"sweep our funds...",
 					commitPoint.SerializeCompressed(),
 					c.cfg.chanState.FundingOutpoint)
-
 			} else {
 				log.Infof("ChannelPoint(%v) is tweakless, " +
 					"moving to sweep directly on chain")

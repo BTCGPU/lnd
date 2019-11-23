@@ -6,16 +6,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/chaincfg"
-	"github.com/btgsuite/btgd/txscript"
-	btcutil "github.com/btgsuite/btgutil"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/watchtower/blob"
 	"github.com/BTCGPU/lnd/watchtower/wtdb"
 	"github.com/BTCGPU/lnd/watchtower/wtmock"
 	"github.com/BTCGPU/lnd/watchtower/wtserver"
 	"github.com/BTCGPU/lnd/watchtower/wtwire"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/chaincfg"
+	"github.com/btgsuite/btgd/txscript"
+	btcutil "github.com/btgsuite/btgutil"
 )
 
 var (

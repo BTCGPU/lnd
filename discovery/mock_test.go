@@ -5,11 +5,11 @@ import (
 	"net"
 	"sync"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/wire"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/lnpeer"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/wire"
 )
 
 // mockPeer implements the lnpeer.Peer interface and is used to test the

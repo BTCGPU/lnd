@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/davecgh/go-spew/spew"
 )
 
 func randInvoice(value lnwire.MilliSatoshi) (*Invoice, error) {

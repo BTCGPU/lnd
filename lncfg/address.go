@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/btgsuite/btgd/btcec"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/tor"
+	"github.com/btgsuite/btgd/btcec"
 )
 
 var (

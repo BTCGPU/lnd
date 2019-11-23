@@ -4,10 +4,10 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/BTCGPU/lnd/input"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
-	"github.com/BTCGPU/lnd/input"
 )
 
 const (

@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/btgsuite/btgd/chaincfg"
 	"github.com/btgsuite/btgd/txscript"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
-	"github.com/BTCGPU/lnd/lnwallet"
 )
 
 // TestDetermineFeePerKw tests that given a fee preference, the

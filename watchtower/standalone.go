@@ -5,9 +5,9 @@ import (
 	"sync/atomic"
 
 	"github.com/BTCGPU/lnd/brontide"
-	"github.com/btgsuite/btgd/btcec"
 	"github.com/BTCGPU/lnd/watchtower/lookout"
 	"github.com/BTCGPU/lnd/watchtower/wtserver"
+	"github.com/btgsuite/btgd/btcec"
 )
 
 // Standalone encapsulates the server-side functionality required by watchtower

@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BTCGPU/lnd/zpay32"
 	"github.com/btgsuite/btgd/btcec"
 	bitcoinCfg "github.com/btgsuite/btgd/chaincfg"
 	"github.com/coreos/bbolt"
-	"github.com/BTCGPU/lnd/zpay32"
 	litecoinCfg "github.com/ltcsuite/ltcd/chaincfg"
 )
 

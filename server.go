@@ -300,7 +300,6 @@ func newServer(listenAddrs []net.Addr, chanDB *channeldb.DB,
 	privKey *btcec.PrivateKey,
 	chansToRestore walletunlocker.ChannelsToRecover,
 	chanPredicate chanacceptor.ChannelAcceptor) (*server, error) {
-
 	var err error
 
 	listeners := make([]net.Listener, len(listenAddrs))

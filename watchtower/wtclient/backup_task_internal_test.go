@@ -7,12 +7,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/chaincfg"
-	"github.com/btgsuite/btgd/txscript"
-	"github.com/btgsuite/btgd/wire"
-	btcutil "github.com/btgsuite/btgutil"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/BTCGPU/lnd/input"
 	"github.com/BTCGPU/lnd/keychain"
 	"github.com/BTCGPU/lnd/lnwallet"
@@ -21,6 +15,12 @@ import (
 	"github.com/BTCGPU/lnd/watchtower/wtdb"
 	"github.com/BTCGPU/lnd/watchtower/wtmock"
 	"github.com/BTCGPU/lnd/watchtower/wtpolicy"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/chaincfg"
+	"github.com/btgsuite/btgd/txscript"
+	"github.com/btgsuite/btgd/wire"
+	btcutil "github.com/btgsuite/btgutil"
+	"github.com/davecgh/go-spew/spew"
 )
 
 const csvDelay uint32 = 144
@@ -92,7 +92,6 @@ func genTaskTest(
 	expRewardAmt int64,
 	bindErr error,
 	tweakless bool) backupTaskTest {
-
 	// Parse the key pairs for all keys used in the test.
 	revSK, revPK := btcec.PrivKeyFromBytes(
 		btcec.S256(), revPrivBytes,

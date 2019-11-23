@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/BTCGPU/lnd/channeldb"
+	"github.com/BTCGPU/lnd/htlcswitch/hop"
+	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/coreos/bbolt"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-errors/errors"
-	"github.com/BTCGPU/lnd/channeldb"
-	"github.com/BTCGPU/lnd/lnwire"
-	"github.com/BTCGPU/lnd/htlcswitch/hop"
 )
 
 var (

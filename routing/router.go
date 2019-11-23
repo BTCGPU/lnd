@@ -19,16 +19,16 @@ import (
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/htlcswitch"
 	"github.com/BTCGPU/lnd/input"
-	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/BTCGPU/lnd/lntypes"
-	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/BTCGPU/lnd/lnwallet/chanvalidate"
+	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/multimutex"
 	"github.com/BTCGPU/lnd/routing/chainview"
 	"github.com/BTCGPU/lnd/routing/route"
-	"github.com/BTCGPU/lnd/zpay32"
 	"github.com/BTCGPU/lnd/ticker"
 	"github.com/BTCGPU/lnd/tlv"
+	"github.com/BTCGPU/lnd/zpay32"
 )
 
 const (
@@ -1356,7 +1356,6 @@ func (r *ChannelRouter) processUpdate(msg interface{}) error {
 // later use getblocktxn)
 func (r *ChannelRouter) fetchFundingTx(
 	chanID *lnwire.ShortChannelID) (*wire.MsgTx, error) {
-
 	// First fetch the block hash by the block number encoded, then use
 	// that hash to fetch the block itself.
 	blockNum := int64(chanID.BlockHeight)
@@ -2270,7 +2269,6 @@ type runningAmounts struct {
 func (r *runningAmounts) prependChannel(policy *channeldb.ChannelEdgePolicy,
 	capacity btcutil.Amount, localChan bool, canIncreaseAmt bool) (
 	runningAmounts, error) {
-
 	// Determine max htlc value.
 	maxHtlc := lnwire.NewMSatFromSatoshis(capacity)
 	if policy.MessageFlags.HasMaxHtlc() {
@@ -2357,7 +2355,6 @@ func (e ErrNoChannel) Error() string {
 func (r *ChannelRouter) BuildRoute(amt *lnwire.MilliSatoshi,
 	hops []route.Vertex, outgoingChan *uint64,
 	finalCltvDelta int32) (*route.Route, error) {
-
 	log.Tracef("BuildRoute called: hopsCount=%v, amt=%v",
 		len(hops), amt)
 
@@ -2419,13 +2416,11 @@ func (r *ChannelRouter) BuildRoute(amt *lnwire.MilliSatoshi,
 		cb := func(tx *bbolt.Tx,
 			edgeInfo *channeldb.ChannelEdgeInfo,
 			_, inEdge *channeldb.ChannelEdgePolicy) error {
-
 			chanID := edgeInfo.ChannelID
 
 			// Apply outgoing channel restriction is active.
 			if localChan && outgoingChan != nil &&
 				chanID != *outgoingChan {
-
 				return nil
 			}
 

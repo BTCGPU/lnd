@@ -7,16 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/chaincfg/chainhash"
-	"github.com/btgsuite/btgd/wire"
-	btcutil "github.com/btgsuite/btgutil"
-	"github.com/coreos/bbolt"
-	"github.com/davecgh/go-spew/spew"
-	"github.com/go-errors/errors"
 	"github.com/BTCGPU/lnd/chainntnfs"
-	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/chanacceptor"
+	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/discovery"
 	"github.com/BTCGPU/lnd/htlcswitch"
 	"github.com/BTCGPU/lnd/input"
@@ -26,6 +19,13 @@ import (
 	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/routing"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/chaincfg/chainhash"
+	"github.com/btgsuite/btgd/wire"
+	btcutil "github.com/btgsuite/btgutil"
+	"github.com/coreos/bbolt"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/go-errors/errors"
 	"golang.org/x/crypto/salsa20"
 )
 
@@ -523,7 +523,6 @@ func (f *fundingManager) start() error {
 			// if the transaction already has been broadcasted.
 			if channel.ChanType == channeldb.SingleFunder &&
 				channel.IsInitiator {
-
 				err := f.cfg.PublishTransaction(
 					channel.FundingTxn,
 				)
@@ -776,7 +775,6 @@ func (f *fundingManager) reservationCoordinator() {
 // NOTE: This MUST be run as a goroutine.
 func (f *fundingManager) advanceFundingState(channel *channeldb.OpenChannel,
 	pendingChanID [32]byte, updateChan chan<- *lnrpc.OpenStatusUpdate) {
-
 	defer f.wg.Done()
 
 	// If the channel is still pending we must wait for the funding
@@ -847,13 +845,11 @@ func (f *fundingManager) stateStep(channel *channeldb.OpenChannel,
 	lnChannel *lnwallet.LightningChannel,
 	shortChanID *lnwire.ShortChannelID, channelState channelOpeningState,
 	updateChan chan<- *lnrpc.OpenStatusUpdate) error {
-
 	chanID := lnwire.NewChanIDFromOutPoint(&channel.FundingOutpoint)
 	fndgLog.Debugf("Channel(%v) with ShortChanID %v has opening state %v",
 		chanID, shortChanID, channelState)
 
 	switch channelState {
-
 	// The funding transaction was confirmed, but we did not successfully
 	// send the fundingLocked message to the peer, so let's do that now.
 	case markedOpen:
@@ -968,7 +964,6 @@ func (f *fundingManager) stateStep(channel *channeldb.OpenChannel,
 // confirm, and marks it open in the database when that happens.
 func (f *fundingManager) advancePendingChannelState(
 	channel *channeldb.OpenChannel, pendingChanID [32]byte) error {
-
 	confChannel, err := f.waitForFundingWithTimeout(channel)
 	if err == ErrConfirmationTimeout {
 		// We'll get a timeout if the number of blocks mined
@@ -1021,7 +1016,6 @@ func (f *fundingManager) advancePendingChannelState(
 		}()
 
 		return timeoutErr
-
 	} else if err != nil {
 		return fmt.Errorf("error waiting for funding "+
 			"confirmation for ChannelPoint(%v): %v",
@@ -1812,7 +1806,6 @@ type confirmedChannel struct {
 // the channel and the funding transaction will be returned.
 func (f *fundingManager) waitForFundingWithTimeout(
 	ch *channeldb.OpenChannel) (*confirmedChannel, error) {
-
 	confChan := make(chan *confirmedChannel)
 	timeoutChan := make(chan error, 1)
 	cancelChan := make(chan struct{})
@@ -1876,7 +1869,6 @@ func makeFundingScript(channel *channeldb.OpenChannel) ([]byte, error) {
 func (f *fundingManager) waitForFundingConfirmation(
 	completeChan *channeldb.OpenChannel, cancelChan <-chan struct{},
 	confChan chan<- *confirmedChannel) {
-
 	defer f.wg.Done()
 	defer close(confChan)
 
@@ -2023,7 +2015,6 @@ func (f *fundingManager) waitForTimeout(completeChan *channeldb.OpenChannel,
 func (f *fundingManager) handleFundingConfirmation(
 	completeChan *channeldb.OpenChannel,
 	confChannel *confirmedChannel) error {
-
 	fundingPoint := completeChan.FundingOutpoint
 	chanID := lnwire.NewChanIDFromOutPoint(&fundingPoint)
 

@@ -6,11 +6,11 @@ import (
 	"encoding/hex"
 	"testing"
 
-	btcutil "github.com/btgsuite/btgutil"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/routing"
 	"github.com/BTCGPU/lnd/routing/route"
 	"github.com/BTCGPU/lnd/tlv"
+	btcutil "github.com/btgsuite/btgutil"
 
 	"github.com/BTCGPU/lnd/lnrpc"
 )

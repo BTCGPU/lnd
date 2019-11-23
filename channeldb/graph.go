@@ -13,13 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/btgsuite/btgd/txscript"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/coreos/bbolt"
-	"github.com/BTCGPU/lnd/lnwire"
 )
 
 var (
@@ -2836,7 +2836,6 @@ func (c *ChannelEdgePolicy) IsDisabled() bool {
 // specified in BOLT07, but will likely change in the near future.
 func (c *ChannelEdgePolicy) ComputeFee(
 	amt lnwire.MilliSatoshi) lnwire.MilliSatoshi {
-
 	return c.FeeBaseMSat + (amt*c.FeeProportionalMillionths)/feeRateParts
 }
 
@@ -2849,7 +2848,6 @@ func divideCeil(dividend, factor lnwire.MilliSatoshi) lnwire.MilliSatoshi {
 // amount.
 func (c *ChannelEdgePolicy) ComputeFeeFromIncoming(
 	incomingAmt lnwire.MilliSatoshi) lnwire.MilliSatoshi {
-
 	return incomingAmt - divideCeil(
 		feeRateParts*(incomingAmt-c.FeeBaseMSat),
 		feeRateParts+c.FeeProportionalMillionths,

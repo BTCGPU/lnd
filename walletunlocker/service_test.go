@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btgsuite/btgd/chaincfg"
-	"github.com/btgsuite/btgwallet/wallet"
 	"github.com/BTCGPU/lnd/aezeed"
 	"github.com/BTCGPU/lnd/keychain"
 	"github.com/BTCGPU/lnd/lnrpc"
 	"github.com/BTCGPU/lnd/lnwallet/btcwallet"
 	"github.com/BTCGPU/lnd/walletunlocker"
+	"github.com/btgsuite/btgd/chaincfg"
+	"github.com/btgsuite/btgwallet/wallet"
 )
 
 var (

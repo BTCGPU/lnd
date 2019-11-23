@@ -10,10 +10,10 @@ import (
 
 	"golang.org/x/crypto/chacha20poly1305"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/txscript"
 	"github.com/BTCGPU/lnd/input"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/txscript"
 )
 
 const (
@@ -174,7 +174,7 @@ func (b *JusticeKit) CommitToLocalRevokeWitnessStack() ([][]byte, error) {
 
 	witnessStack := make([][]byte, 2)
 	witnessStack[0] = append(toLocalSig.Serialize(),
-		byte(txscript.SigHashAll | txscript.SigHashForkID))
+		byte(txscript.SigHashAll|txscript.SigHashForkID))
 	witnessStack[1] = []byte{1}
 
 	return witnessStack, nil
@@ -207,7 +207,7 @@ func (b *JusticeKit) CommitToRemoteWitnessStack() ([][]byte, error) {
 
 	witnessStack := make([][]byte, 1)
 	witnessStack[0] = append(toRemoteSig.Serialize(),
-		byte(txscript.SigHashAll | txscript.SigHashForkID))
+		byte(txscript.SigHashAll|txscript.SigHashForkID))
 
 	return witnessStack, nil
 }

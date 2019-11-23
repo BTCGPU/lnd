@@ -5,10 +5,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/BTCGPU/lnd/chainntnfs"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
-	"github.com/BTCGPU/lnd/chainntnfs"
 )
 
 var (

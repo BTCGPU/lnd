@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btgsuite/btgd/wire"
 	"github.com/BTCGPU/lnd/chainntnfs"
 	"github.com/BTCGPU/lnd/input"
 	"github.com/BTCGPU/lnd/lntypes"
 	"github.com/BTCGPU/lnd/lnwallet"
+	"github.com/btgsuite/btgd/wire"
 )
 
 type mockSigner struct {

@@ -8,11 +8,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/BTCGPU/lnd/channeldb"
+	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/btgsuite/btgd/btcec"
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/coreos/bbolt"
-	"github.com/BTCGPU/lnd/channeldb"
-	"github.com/BTCGPU/lnd/lnwire"
 )
 
 var (

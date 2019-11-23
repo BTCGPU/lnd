@@ -6,10 +6,10 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/coreos/bbolt"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/routing/route"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/coreos/bbolt"
 )
 
 // migrateNodeAndEdgeUpdateIndex is a migration function that will update the

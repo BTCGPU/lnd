@@ -6,13 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/BTCGPU/lnd/input"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/watchtower/wtdb"
 	"github.com/BTCGPU/lnd/watchtower/wtserver"
 	"github.com/BTCGPU/lnd/watchtower/wtwire"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/chaincfg/chainhash"
 )
 
 // reserveStatus is an enum that signals how full a particular session is.

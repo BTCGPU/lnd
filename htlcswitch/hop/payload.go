@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/BTCGPU/lightning-onion"
+	sphinx "github.com/BTCGPU/lightning-onion"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/record"
 	"github.com/BTCGPU/lnd/tlv"

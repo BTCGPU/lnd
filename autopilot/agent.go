@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/btgsuite/btgd/btcec"
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/BTCGPU/lnd/lnwire"
 )
 
 // Config couples all the items that an autopilot agent needs to function.

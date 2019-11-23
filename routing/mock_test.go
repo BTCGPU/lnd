@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/go-errors/errors"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/htlcswitch"
 	"github.com/BTCGPU/lnd/lntypes"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/routing/route"
 	"github.com/BTCGPU/lnd/zpay32"
+	"github.com/go-errors/errors"
 )
 
 type mockPaymentAttemptDispatcher struct {

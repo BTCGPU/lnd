@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/BTCGPU/lnd/keychain"
+	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/btgsuite/btgd/chaincfg"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/btgsuite/btgd/txscript"
@@ -19,8 +21,6 @@ import (
 	"github.com/btgsuite/btgwallet/wallet/txauthor"
 	"github.com/btgsuite/btgwallet/wallet/txrules"
 	"github.com/btgsuite/btgwallet/walletdb"
-	"github.com/BTCGPU/lnd/keychain"
-	"github.com/BTCGPU/lnd/lnwallet"
 )
 
 const (
@@ -434,7 +434,6 @@ func (b *BtcWallet) PublishTransaction(tx *wire.MsgTx) error {
 		// If we failed to publish the transaction, check whether we
 		// got an error of known type.
 		switch err.(type) {
-
 		// If the wallet reports a double spend, convert it to our
 		// internal ErrDoubleSpend and return.
 		case *base.ErrDoubleSpend:

@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"io"
 
-	"github.com/coreos/bbolt"
 	"github.com/BTCGPU/lnd/routing/route"
+	"github.com/coreos/bbolt"
 )
 
 // migrateRouteSerialization migrates the way we serialize routes across the

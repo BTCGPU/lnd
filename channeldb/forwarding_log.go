@@ -6,8 +6,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/coreos/bbolt"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/coreos/bbolt"
 )
 
 var (

@@ -8,11 +8,11 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/BTCGPU/lnd/channeldb"
+	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/coreos/bbolt"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/BTCGPU/lnd/channeldb"
-	"github.com/BTCGPU/lnd/lnwire"
 )
 
 func createTestMessageStore(t *testing.T) (*MessageStore, func()) {

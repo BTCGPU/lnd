@@ -8,8 +8,8 @@ import (
 	"path"
 	"testing"
 
-	"github.com/coreos/bbolt"
 	"github.com/BTCGPU/lnd/macaroons"
+	"github.com/coreos/bbolt"
 	"google.golang.org/grpc/metadata"
 	"gopkg.in/macaroon-bakery.v2/bakery"
 	"gopkg.in/macaroon-bakery.v2/bakery/checkers"

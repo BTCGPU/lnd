@@ -57,4 +57,4 @@ linters:
 
 issues:
   # Only show newly introduced problems.
-  new-from-rev: 01f696afce2f9c0d4ed854edefa3846891d01d8a
+  new-from-rev: 648be8bb13c136f958b4cd70fd49e4050fd51184

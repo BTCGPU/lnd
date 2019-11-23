@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/wire"
-	btcutil "github.com/btgsuite/btgutil"
 	"github.com/BTCGPU/lnd/autopilot"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/tor"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/wire"
+	btcutil "github.com/btgsuite/btgutil"
 )
 
 // validateAtplConfig is a helper method that makes sure the passed

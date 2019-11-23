@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/BTCGPU/lnd/lnpeer"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"golang.org/x/time/rate"
 )
 

@@ -8,14 +8,14 @@ import (
 	"os"
 	"time"
 
-	"github.com/btgsuite/btgd/chaincfg"
-	"github.com/btgsuite/btgwallet/wallet"
 	"github.com/BTCGPU/lnd/aezeed"
 	"github.com/BTCGPU/lnd/chanbackup"
 	"github.com/BTCGPU/lnd/keychain"
 	"github.com/BTCGPU/lnd/lnrpc"
 	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/BTCGPU/lnd/lnwallet/btcwallet"
+	"github.com/btgsuite/btgd/chaincfg"
+	"github.com/btgsuite/btgwallet/wallet"
 )
 
 // ChannelsToRecover wraps any set of packed (serialized+encrypted) channel

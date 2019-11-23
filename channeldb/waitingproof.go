@@ -8,9 +8,9 @@ import (
 
 	"bytes"
 
+	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/coreos/bbolt"
 	"github.com/go-errors/errors"
-	"github.com/BTCGPU/lnd/lnwire"
 )
 
 var (

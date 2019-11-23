@@ -342,7 +342,6 @@ type FailIncorrectDetails struct {
 // error bound to the specified HTLC amount and acceptance height.
 func NewFailIncorrectDetails(amt MilliSatoshi,
 	height uint32) *FailIncorrectDetails {
-
 	return &FailIncorrectDetails{
 		amount: amt,
 		height: height,

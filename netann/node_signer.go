@@ -3,9 +3,9 @@ package netann
 import (
 	"fmt"
 
+	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
-	"github.com/BTCGPU/lnd/lnwallet"
 )
 
 // NodeSigner is an implementation of the MessageSigner interface backed by the

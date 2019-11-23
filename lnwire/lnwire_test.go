@@ -14,12 +14,12 @@ import (
 	"testing/quick"
 	"time"
 
+	"github.com/BTCGPU/lnd/tor"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/BTCGPU/lnd/tor"
 )
 
 var (

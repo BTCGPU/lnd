@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	flags "github.com/jessevdk/go-flags"
 	"github.com/BTCGPU/lnd"
+	flags "github.com/jessevdk/go-flags"
 )
 
 func main() {

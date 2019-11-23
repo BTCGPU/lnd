@@ -1,8 +1,8 @@
 package wtclient
 
 import (
-	"github.com/btgsuite/btgd/btcec"
 	"github.com/BTCGPU/lnd/keychain"
+	"github.com/btgsuite/btgd/btcec"
 )
 
 // DeriveSessionKey accepts an session key index for an existing session and

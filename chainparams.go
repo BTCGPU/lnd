@@ -1,11 +1,11 @@
 package lnd
 
 import (
+	"github.com/BTCGPU/lnd/keychain"
 	"github.com/btgsuite/btgd/chaincfg"
 	bitcoinCfg "github.com/btgsuite/btgd/chaincfg"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	bitcoinWire "github.com/btgsuite/btgd/wire"
-	"github.com/BTCGPU/lnd/keychain"
 	litecoinCfg "github.com/ltcsuite/ltcd/chaincfg"
 	litecoinWire "github.com/ltcsuite/ltcd/wire"
 )

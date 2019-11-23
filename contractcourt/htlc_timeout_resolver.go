@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/btgsuite/btgd/wire"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/BTCGPU/lnd/chainntnfs"
 	"github.com/BTCGPU/lnd/input"
 	"github.com/BTCGPU/lnd/lntypes"
 	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/btgsuite/btgd/wire"
+	"github.com/davecgh/go-spew/spew"
 )
 
 // htlcTimeoutResolver is a ContractResolver that's capable of resolving an

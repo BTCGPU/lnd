@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/btgsuite/btgd/btcec"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/btgsuite/btgd/btcec"
 )
 
 // ChannelUpdateModifier is a closure that makes in-place modifications to an

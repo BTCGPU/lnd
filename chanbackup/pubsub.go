@@ -6,9 +6,9 @@ import (
 	"net"
 	"sync"
 
-	"github.com/btgsuite/btgd/wire"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/keychain"
+	"github.com/btgsuite/btgd/wire"
 )
 
 // Swapper is an interface that allows the chanbackup.SubSwapper to update the

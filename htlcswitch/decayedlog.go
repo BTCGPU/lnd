@@ -8,9 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/coreos/bbolt"
 	sphinx "github.com/BTCGPU/lightning-onion"
 	"github.com/BTCGPU/lnd/chainntnfs"
+	"github.com/coreos/bbolt"
 )
 
 const (

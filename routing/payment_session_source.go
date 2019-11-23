@@ -1,11 +1,11 @@
 package routing
 
 import (
-	"github.com/btgsuite/btgd/btcec"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/routing/route"
 	"github.com/BTCGPU/lnd/zpay32"
+	"github.com/btgsuite/btgd/btcec"
 )
 
 // A compile time assertion to ensure MissionControl meets the

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/coreos/bbolt"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/coreos/bbolt"
 )
 
 // ErrCorruptedFwdPkg signals that the on-disk structure of the forwarding

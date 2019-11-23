@@ -911,7 +911,6 @@ func CommitSpendRevoke(signer Signer, signDesc *SignDescriptor,
 // current commitment point.
 func CommitSpendNoDelay(signer Signer, signDesc *SignDescriptor,
 	sweepTx *wire.MsgTx, tweakless bool) (wire.TxWitness, error) {
-
 	if signDesc.KeyDesc.PubKey == nil {
 		return nil, fmt.Errorf("cannot generate witness with nil " +
 			"KeyDesc pubkey")

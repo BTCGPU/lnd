@@ -3,15 +3,15 @@ package lookout
 import (
 	"errors"
 
+	"github.com/BTCGPU/lnd/input"
+	"github.com/BTCGPU/lnd/watchtower/blob"
+	"github.com/BTCGPU/lnd/watchtower/wtdb"
 	"github.com/btgsuite/btgd/blockchain"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/txscript"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/btgsuite/btgutil/txsort"
-	"github.com/BTCGPU/lnd/input"
-	"github.com/BTCGPU/lnd/watchtower/blob"
-	"github.com/BTCGPU/lnd/watchtower/wtdb"
 )
 
 var (

@@ -34,16 +34,16 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/btgsuite/btgwallet/wallet"
+	"github.com/BTCGPU/neutrino"
 	"github.com/btgsuite/btgd/btcec"
 	btcutil "github.com/btgsuite/btgutil"
+	"github.com/btgsuite/btgwallet/wallet"
 	proxy "github.com/grpc-ecosystem/grpc-gateway/runtime"
-	"github.com/BTCGPU/neutrino"
 
 	"github.com/BTCGPU/lnd/autopilot"
 	"github.com/BTCGPU/lnd/build"
-	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/chanacceptor"
+	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/keychain"
 	"github.com/BTCGPU/lnd/lncfg"
 	"github.com/BTCGPU/lnd/lnrpc"
@@ -835,7 +835,7 @@ func genCertPair(certFile, keyFile string, tlsExtraIPs,
 
 		KeyUsage: x509.KeyUsageKeyEncipherment |
 			x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		IsCA: true, // so can sign self.
+		IsCA:                  true, // so can sign self.
 		BasicConstraintsValid: true,
 
 		DNSNames:    dnsNames,

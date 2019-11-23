@@ -22,7 +22,6 @@ import (
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/input"
 	"github.com/BTCGPU/lnd/keychain"
-	"github.com/btgsuite/btgd/mempool"
 	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/BTCGPU/lnd/lnwallet/btcwallet"
 	"github.com/BTCGPU/lnd/lnwire"
@@ -32,6 +31,7 @@ import (
 	"github.com/btgsuite/btgd/chaincfg"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/btgsuite/btgd/integration/rpctest"
+	"github.com/btgsuite/btgd/mempool"
 	"github.com/btgsuite/btgd/rpcclient"
 	"github.com/btgsuite/btgd/txscript"
 	"github.com/btgsuite/btgd/wire"
@@ -792,7 +792,6 @@ func assertContributionInitPopulated(t *testing.T, c *lnwallet.ChannelContributi
 
 func testSingleFunderReservationWorkflow(miner *rpctest.Harness,
 	alice, bob *lnwallet.LightningWallet, t *testing.T, tweakless bool) {
-
 	// For this scenario, Alice will be the channel initiator while bob
 	// will act as the responder to the workflow.
 
@@ -1478,7 +1477,6 @@ func mineAndAssert(r *rpctest.Harness, tx *wire.MsgTx) error {
 func txFromOutput(tx *wire.MsgTx, signer input.Signer, fromPubKey,
 	payToPubKey *btcec.PublicKey, txFee btcutil.Amount,
 	rbf bool) (*wire.MsgTx, error) {
-
 	// Generate the script we want to spend from.
 	keyScript, err := scriptFromKey(fromPubKey)
 	if err != nil {
@@ -1610,7 +1608,6 @@ func newTx(t *testing.T, r *rpctest.Harness, pubKey *btcec.PublicKey,
 // current mempool or chain.
 func testPublishTransaction(r *rpctest.Harness,
 	alice, _ *lnwallet.LightningWallet, t *testing.T) {
-
 	// Generate a pubkey, and pay-to-addr script.
 	keyDesc, err := alice.DeriveNextKey(keychain.KeyFamilyMultiSig)
 	if err != nil {

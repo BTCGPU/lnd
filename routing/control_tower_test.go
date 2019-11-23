@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btgsuite/btgd/btcec"
 	"github.com/BTCGPU/lnd/channeldb"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/BTCGPU/lnd/routing/route"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/davecgh/go-spew/spew"
 
 	"github.com/BTCGPU/lnd/lntypes"
 )

@@ -3,10 +3,8 @@
 package routerrpc
 
 import (
-	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/macaroons"
 	"github.com/BTCGPU/lnd/routing"
-	btcutil "github.com/btgsuite/btgutil"
 )
 
 // Config is the main configuration file for the router RPC server. It contains

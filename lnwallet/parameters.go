@@ -1,9 +1,9 @@
 package lnwallet
 
 import (
+	"github.com/BTCGPU/lnd/input"
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/btgsuite/btgwallet/wallet/txrules"
-	"github.com/BTCGPU/lnd/input"
 )
 
 // DefaultDustLimit is used to calculate the dust HTLC amount which will be

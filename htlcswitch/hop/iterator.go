@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/btgsuite/btgd/btcec"
 	sphinx "github.com/BTCGPU/lightning-onion"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/btgsuite/btgd/btcec"
 )
 
 // Iterator is an interface that abstracts away the routing information

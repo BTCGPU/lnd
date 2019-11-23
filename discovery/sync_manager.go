@@ -6,11 +6,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/BTCGPU/lnd/lnpeer"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/routing/route"
 	"github.com/BTCGPU/lnd/ticker"
+	"github.com/btgsuite/btgd/chaincfg/chainhash"
 )
 
 const (

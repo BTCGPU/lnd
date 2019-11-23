@@ -9,11 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/chaincfg/chainhash"
-	"github.com/btgsuite/btgd/wire"
-	btcutil "github.com/btgsuite/btgutil"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/BTCGPU/lnd/chainntnfs"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/lnpeer"
@@ -23,6 +18,11 @@ import (
 	"github.com/BTCGPU/lnd/routing"
 	"github.com/BTCGPU/lnd/routing/route"
 	"github.com/BTCGPU/lnd/ticker"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/chaincfg/chainhash"
+	"github.com/btgsuite/btgd/wire"
+	btcutil "github.com/btgsuite/btgutil"
+	"github.com/davecgh/go-spew/spew"
 )
 
 var (
@@ -376,7 +376,6 @@ type EdgeWithInfo struct {
 // used to update the forwarding policies of the underlying links.
 func (d *AuthenticatedGossiper) PropagateChanPolicyUpdate(
 	edgesToUpdate []EdgeWithInfo) error {
-
 	errChan := make(chan error, 1)
 	policyUpdate := &chanPolicyUpdateRequest{
 		edgesToUpdate: edgesToUpdate,
@@ -1320,7 +1319,6 @@ func (d *AuthenticatedGossiper) retransmitStaleAnns(now time.Time) error {
 // provided list of edges and updates the backing ChannelGraphSource.
 func (d *AuthenticatedGossiper) processChanPolicyUpdate(
 	edgesToUpdate []EdgeWithInfo) ([]networkMsg, error) {
-
 	var chanUpdates []networkMsg
 	for _, edgeInfo := range edgesToUpdate {
 		// Now that we've collected all the channels we need to update,

@@ -629,7 +629,6 @@ func marshallFailureReason(reason channeldb.FailureReason) (
 // BuildRoute builds a route from a list of hop addresses.
 func (s *Server) BuildRoute(ctx context.Context,
 	req *BuildRouteRequest) (*BuildRouteResponse, error) {
-
 	// Unmarshall hop list.
 	hops := make([]route.Vertex, len(req.HopPubkeys))
 	for i, pubkeyBytes := range req.HopPubkeys {

@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/btgsuite/btgd/wire"
 	"github.com/BTCGPU/lnd/channeldb"
+	"github.com/btgsuite/btgd/wire"
 )
 
 // makeTestDB creates a new instance of the ChannelDB for testing purposes. A

@@ -3,9 +3,9 @@ package channelnotifier
 import (
 	"sync"
 
-	"github.com/btgsuite/btgd/wire"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/subscribe"
+	"github.com/btgsuite/btgd/wire"
 )
 
 // ChannelNotifier is a subsystem which all active, inactive, and closed channel

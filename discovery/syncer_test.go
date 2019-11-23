@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/btgsuite/btgd/chaincfg"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/BTCGPU/lnd/lnwire"
 )
 
 const (

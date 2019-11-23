@@ -1,8 +1,8 @@
 package netann
 
 import (
-	"github.com/btgsuite/btgd/wire"
 	"github.com/BTCGPU/lnd/channeldb"
+	"github.com/btgsuite/btgd/wire"
 )
 
 // DB abstracts the required database functionality needed by the

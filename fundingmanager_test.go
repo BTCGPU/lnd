@@ -23,8 +23,8 @@ import (
 	btcutil "github.com/btgsuite/btgutil"
 
 	"github.com/BTCGPU/lnd/chainntnfs"
-	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/chanacceptor"
+	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/discovery"
 	"github.com/BTCGPU/lnd/htlcswitch"
 	"github.com/BTCGPU/lnd/input"

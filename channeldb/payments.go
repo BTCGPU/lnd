@@ -9,13 +9,13 @@ import (
 	"sort"
 	"time"
 
+	"github.com/BTCGPU/lnd/lntypes"
+	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/BTCGPU/lnd/routing/route"
+	"github.com/BTCGPU/lnd/tlv"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/wire"
 	"github.com/coreos/bbolt"
-	"github.com/BTCGPU/lnd/lnwire"
-	"github.com/BTCGPU/lnd/lntypes"
-	"github.com/BTCGPU/lnd/routing/route"
-	"github.com/BTCGPU/lnd/tlv"
 )
 
 var (

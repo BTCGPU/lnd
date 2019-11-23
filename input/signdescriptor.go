@@ -5,10 +5,10 @@ import (
 	"errors"
 	"io"
 
+	"github.com/BTCGPU/lnd/keychain"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/txscript"
 	"github.com/btgsuite/btgd/wire"
-	"github.com/BTCGPU/lnd/keychain"
 )
 
 var (

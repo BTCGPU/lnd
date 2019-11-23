@@ -423,7 +423,6 @@ func (c *ChainArbitrator) Start() error {
 
 		closeTx, err := channel.BroadcastedCommitment()
 		switch {
-
 		// This can happen for channels that had their closing tx
 		// published before we started storing it to disk.
 		case err == channeldb.ErrNoCloseTx:

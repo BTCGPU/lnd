@@ -3,10 +3,10 @@ package lnpeer
 import (
 	"net"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/wire"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/wire"
 )
 
 // Peer is an interface which represents the remote lightning node inside our

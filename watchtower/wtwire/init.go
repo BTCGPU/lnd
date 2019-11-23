@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/btgsuite/btgd/chaincfg/chainhash"
 )
 
 // Init is the first message sent over the watchtower wire protocol, and

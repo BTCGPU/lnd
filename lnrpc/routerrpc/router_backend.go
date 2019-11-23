@@ -10,14 +10,14 @@ import (
 
 	"github.com/btgsuite/btgd/btcec"
 
-	btcutil "github.com/btgsuite/btgutil"
-	"github.com/btgsuite/btgd/chaincfg"
 	"github.com/BTCGPU/lnd/lnrpc"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/routing"
 	"github.com/BTCGPU/lnd/routing/route"
-	"github.com/BTCGPU/lnd/zpay32"
 	"github.com/BTCGPU/lnd/tlv"
+	"github.com/BTCGPU/lnd/zpay32"
+	"github.com/btgsuite/btgd/chaincfg"
+	btcutil "github.com/btgsuite/btgutil"
 )
 
 // RouterBackend contains the backend implementation of the router rpc sub

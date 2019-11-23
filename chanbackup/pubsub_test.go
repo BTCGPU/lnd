@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BTCGPU/lnd/keychain"
 	"github.com/btgsuite/btgd/wire"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/BTCGPU/lnd/keychain"
 )
 
 type mockSwapper struct {

@@ -3,11 +3,11 @@ package wtmock
 import (
 	"sync"
 
+	"github.com/BTCGPU/lnd/input"
+	"github.com/BTCGPU/lnd/keychain"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/txscript"
 	"github.com/btgsuite/btgd/wire"
-	"github.com/BTCGPU/lnd/input"
-	"github.com/BTCGPU/lnd/keychain"
 )
 
 // MockSigner is an input.Signer that allows one to add arbitrary private keys

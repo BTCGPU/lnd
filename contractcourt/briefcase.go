@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/btgsuite/btgd/chaincfg/chainhash"
-	"github.com/btgsuite/btgd/wire"
-	"github.com/coreos/bbolt"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/input"
 	"github.com/BTCGPU/lnd/lnwallet"
+	"github.com/btgsuite/btgd/chaincfg/chainhash"
+	"github.com/btgsuite/btgd/wire"
+	"github.com/coreos/bbolt"
 )
 
 // ContractResolutions is a wrapper struct around the two forms of resolutions

@@ -432,7 +432,6 @@ func (p *peer) QuitSignal() <-chan struct{} {
 // channels that haven't been closed yet.
 func (p *peer) loadActiveChannels(chans []*channeldb.OpenChannel) (
 	[]lnwire.Message, error) {
-
 	// Return a slice of messages to send to the peers in case the channel
 	// cannot be loaded normally.
 	var msgs []lnwire.Message
@@ -1191,7 +1190,6 @@ func (p *peer) handleError(msg *lnwire.Error) bool {
 	key := p.addr.IdentityKey
 
 	switch {
-
 	// In the case of an all-zero channel ID we want to forward the error to
 	// all channels with this peer.
 	case msg.ChanID == lnwire.ConnectionWideID:

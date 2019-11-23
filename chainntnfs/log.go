@@ -1,8 +1,8 @@
 package chainntnfs
 
 import (
-	"github.com/btcsuite/btclog"
 	"github.com/BTCGPU/lnd/build"
+	"github.com/btcsuite/btclog"
 )
 
 // Log is a logger that is initialized with no output filters.  This

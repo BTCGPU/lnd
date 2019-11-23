@@ -10,12 +10,12 @@ import (
 
 	"net"
 
+	"github.com/BTCGPU/lnd/tor"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/go-errors/errors"
-	"github.com/BTCGPU/lnd/tor"
 )
 
 // MaxSliceLength is the maximum allowed length for any opaque byte slices in

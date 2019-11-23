@@ -5,12 +5,12 @@ import (
 	"net"
 	"time"
 
+	"github.com/BTCGPU/lnd/tor"
+	"github.com/BTCGPU/lnd/watchtower/lookout"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
-	"github.com/BTCGPU/lnd/tor"
-	"github.com/BTCGPU/lnd/watchtower/lookout"
 )
 
 const (

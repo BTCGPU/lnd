@@ -10,14 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/btgsuite/btgd/wire"
-	"github.com/davecgh/go-spew/spew"
-	"github.com/go-errors/errors"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/contractcourt"
 	"github.com/BTCGPU/lnd/htlcswitch/hodl"
-	"github.com/BTCGPU/lnd/input"
 	"github.com/BTCGPU/lnd/htlcswitch/hop"
+	"github.com/BTCGPU/lnd/input"
 	"github.com/BTCGPU/lnd/invoices"
 	"github.com/BTCGPU/lnd/lnpeer"
 	"github.com/BTCGPU/lnd/lntypes"
@@ -25,6 +22,9 @@ import (
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/queue"
 	"github.com/BTCGPU/lnd/ticker"
+	"github.com/btgsuite/btgd/wire"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/go-errors/errors"
 )
 
 func init() {
@@ -1217,7 +1217,6 @@ loop:
 // this function returns without an error, the commit tx should be updated.
 func (l *channelLink) processHodlEvent(hodlEvent invoices.HodlEvent,
 	htlc hodlHtlc) error {
-
 	l.batchCounter++
 
 	circuitKey := hodlEvent.CircuitKey

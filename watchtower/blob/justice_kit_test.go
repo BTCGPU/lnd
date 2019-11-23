@@ -8,11 +8,11 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/txscript"
 	"github.com/BTCGPU/lnd/input"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/watchtower/blob"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/txscript"
 )
 
 func makePubKey(i uint64) blob.PubKey {
@@ -279,7 +279,7 @@ func TestJusticeKitRemoteWitnessConstruction(t *testing.T) {
 	// Compute the expected first element, by appending a sighash all byte
 	// to our raw DER-encoded signature.
 	rawToRemoteSigWithSigHash := append(
-		rawToRemoteSig.Serialize(), byte(txscript.SigHashAll | txscript.SigHashForkID),
+		rawToRemoteSig.Serialize(), byte(txscript.SigHashAll|txscript.SigHashForkID),
 	)
 
 	// Assert that the expected signature matches the first element in the
@@ -394,7 +394,7 @@ func TestJusticeKitToLocalWitnessConstruction(t *testing.T) {
 	// Next, compute the expected signature in the bottom element of the
 	// stack, by appending a sighash all flag to the raw DER signature.
 	rawRevSigWithSigHash := append(
-		rawRevSig.Serialize(), byte(txscript.SigHashAll | txscript.SigHashForkID),
+		rawRevSig.Serialize(), byte(txscript.SigHashAll|txscript.SigHashForkID),
 	)
 
 	// Assert that the second element on the stack matches our expected

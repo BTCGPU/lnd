@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/BTCGPU/neutrino"
 	"github.com/BTCGPU/lnd/chainntnfs"
+	"github.com/BTCGPU/neutrino"
 )
 
 // createNewNotifier creates a new instance of the ChainNotifier interface

@@ -3077,7 +3077,6 @@ func (lc *LightningChannel) createCommitDiff(
 func (lc *LightningChannel) validateCommitmentSanity(theirLogCounter,
 	ourLogCounter uint64, remoteChain bool,
 	predictAdded *PaymentDescriptor) error {
-
 	// Fetch all updates not committed.
 	view := lc.fetchHTLCView(theirLogCounter, ourLogCounter)
 
@@ -3149,7 +3148,6 @@ func (lc *LightningChannel) validateCommitmentSanity(theirLogCounter,
 	// the passed channel constraints.
 	validateUpdates := func(updates []*PaymentDescriptor,
 		constraints *channeldb.ChannelConfig) error {
-
 		// We keep track of the number of HTLCs in flight for the
 		// commitment, and the amount in flight.
 		var numInFlight uint16

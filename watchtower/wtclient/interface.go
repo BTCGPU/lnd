@@ -3,12 +3,12 @@ package wtclient
 import (
 	"net"
 
-	"github.com/btgsuite/btgd/btcec"
 	"github.com/BTCGPU/lnd/brontide"
 	"github.com/BTCGPU/lnd/keychain"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/watchtower/wtdb"
 	"github.com/BTCGPU/lnd/watchtower/wtserver"
+	"github.com/btgsuite/btgd/btcec"
 )
 
 // DB abstracts the required database operations required by the watchtower

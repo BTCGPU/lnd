@@ -7,12 +7,12 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/btgsuite/btgd/btcjson"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/btgsuite/btgd/wire"
 	"github.com/btgsuite/btgwallet/chain"
 	"github.com/btgsuite/btgwallet/wtxmgr"
-	"github.com/BTCGPU/lnd/channeldb"
 )
 
 // BitcoindFilteredChainView is an implementation of the FilteredChainView

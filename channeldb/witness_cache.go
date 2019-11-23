@@ -3,8 +3,8 @@ package channeldb
 import (
 	"fmt"
 
-	"github.com/coreos/bbolt"
 	"github.com/BTCGPU/lnd/lntypes"
+	"github.com/coreos/bbolt"
 )
 
 var (

@@ -466,7 +466,6 @@ func newRPCServer(s *server, macService *macaroons.Service,
 	invoiceRegistry *invoices.InvoiceRegistry, tower *watchtower.Standalone,
 	tlsCfg *tls.Config, getListeners rpcListeners,
 	chanPredicate *chanacceptor.ChainedAcceptor) (*rpcServer, error) {
-
 	// Set up router rpc backend.
 	channelGraph := s.chanDB.ChannelGraph()
 	selfNode, err := channelGraph.SourceNode()

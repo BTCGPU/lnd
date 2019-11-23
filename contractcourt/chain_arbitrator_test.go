@@ -6,10 +6,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/btgsuite/btgd/chaincfg/chainhash"
-	"github.com/btgsuite/btgd/wire"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/lnwallet"
+	"github.com/btgsuite/btgd/chaincfg/chainhash"
+	"github.com/btgsuite/btgd/wire"
 )
 
 // TestChainArbitratorRepulishCommitment testst that the chain arbitrator will

@@ -1,10 +1,10 @@
 package watchtower
 
 import (
-	"github.com/btcsuite/btclog"
 	"github.com/BTCGPU/lnd/build"
 	"github.com/BTCGPU/lnd/watchtower/lookout"
 	"github.com/BTCGPU/lnd/watchtower/wtserver"
+	"github.com/btcsuite/btclog"
 )
 
 // log is a logger that is initialized with no output filters.  This

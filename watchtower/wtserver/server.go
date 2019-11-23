@@ -8,13 +8,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/BTCGPU/lnd/watchtower/wtdb"
+	"github.com/BTCGPU/lnd/watchtower/wtwire"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/btgsuite/btgd/connmgr"
 	btcutil "github.com/btgsuite/btgutil"
-	"github.com/BTCGPU/lnd/lnwire"
-	"github.com/BTCGPU/lnd/watchtower/wtdb"
-	"github.com/BTCGPU/lnd/watchtower/wtwire"
 )
 
 var (

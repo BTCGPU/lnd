@@ -2891,7 +2891,6 @@ func TestRetransmit(t *testing.T) {
 	// announcements + channel updates + node announcements are broadcast.
 	checkAnnouncements := func(t *testing.T, chanAnns, chanUpds,
 		nodeAnns int) {
-
 		t.Helper()
 
 		num := chanAnns + chanUpds + nodeAnns
@@ -3606,7 +3605,6 @@ out:
 	err = ctx.router.ForAllOutgoingChannels(func(
 		info *channeldb.ChannelEdgeInfo,
 		edge *channeldb.ChannelEdgePolicy) error {
-
 		edge.TimeLockDelta = uint16(newTimeLockDelta)
 		edgesToUpdate = append(edgesToUpdate, EdgeWithInfo{
 			Info: info,

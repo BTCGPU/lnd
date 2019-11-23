@@ -1,17 +1,17 @@
 package wtclient
 
 import (
+	"github.com/BTCGPU/lnd/input"
+	"github.com/BTCGPU/lnd/lnwallet"
+	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/BTCGPU/lnd/watchtower/blob"
+	"github.com/BTCGPU/lnd/watchtower/wtdb"
 	"github.com/btgsuite/btgd/blockchain"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/txscript"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/btgsuite/btgutil/txsort"
-	"github.com/BTCGPU/lnd/input"
-	"github.com/BTCGPU/lnd/lnwallet"
-	"github.com/BTCGPU/lnd/lnwire"
-	"github.com/BTCGPU/lnd/watchtower/blob"
-	"github.com/BTCGPU/lnd/watchtower/wtdb"
 )
 
 // backupTask is an internal struct for computing the justice transaction for a
@@ -55,7 +55,6 @@ type backupTask struct {
 func newBackupTask(chanID *lnwire.ChannelID,
 	breachInfo *lnwallet.BreachRetribution,
 	sweepPkScript []byte, isTweakless bool) *backupTask {
-
 	// Parse the non-dust outputs from the breach transaction,
 	// simultaneously computing the total amount contained in the inputs
 	// present. We can't compute the exact output values at this time

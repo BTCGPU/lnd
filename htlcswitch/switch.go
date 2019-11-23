@@ -11,6 +11,7 @@ import (
 	"github.com/BTCGPU/lnd/chainntnfs"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/contractcourt"
+	"github.com/BTCGPU/lnd/htlcswitch/hop"
 	"github.com/BTCGPU/lnd/lntypes"
 	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/BTCGPU/lnd/lnwire"
@@ -19,7 +20,6 @@ import (
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/coreos/bbolt"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/BTCGPU/lnd/htlcswitch/hop"
 )
 
 const (
@@ -432,7 +432,6 @@ func (s *Switch) SendHTLC(firstHop lnwire.ShortChannelID, paymentID uint64,
 // down.
 func (s *Switch) UpdateForwardingPolicies(
 	chanPolicies map[wire.OutPoint]ForwardingPolicy) {
-
 	log.Tracef("Updating link policies: %v", newLogClosure(func() string {
 		return spew.Sdump(chanPolicies)
 	}))

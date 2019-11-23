@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/btgsuite/btgd/chaincfg"
 	"github.com/btgsuite/btgd/btcjson"
+	"github.com/btgsuite/btgd/chaincfg"
 	"github.com/btgsuite/btgd/integration/rpctest"
 	"github.com/btgsuite/btgd/rpcclient"
 )
@@ -44,11 +44,11 @@ var _ BackendConfig = (*BtcdBackendConfig)(nil)
 func (b BtcdBackendConfig) GenArgs() []string {
 	var args []string
 	encodedCert := hex.EncodeToString(b.rpcConfig.Certificates)
-	args = append(args, "--bitcoin.node=btcd")
-	args = append(args, fmt.Sprintf("--btcd.rpchost=%v", b.rpcConfig.Host))
-	args = append(args, fmt.Sprintf("--btcd.rpcuser=%v", b.rpcConfig.User))
-	args = append(args, fmt.Sprintf("--btcd.rpcpass=%v", b.rpcConfig.Pass))
-	args = append(args, fmt.Sprintf("--btcd.rawrpccert=%v", encodedCert))
+	args = append(args, "--bitcoingold.node=btgd")
+	args = append(args, fmt.Sprintf("--btgd.rpchost=%v", b.rpcConfig.Host))
+	args = append(args, fmt.Sprintf("--btgd.rpcuser=%v", b.rpcConfig.User))
+	args = append(args, fmt.Sprintf("--btgd.rpcpass=%v", b.rpcConfig.Pass))
+	args = append(args, fmt.Sprintf("--btgd.rawrpccert=%v", encodedCert))
 
 	return args
 }
@@ -65,7 +65,7 @@ func (b BtcdBackendConfig) DisconnectMiner() error {
 
 // Name returns the name of the backend type.
 func (b BtcdBackendConfig) Name() string {
-	return "btcd"
+	return "btgd"
 }
 
 // NewBackend starts a new rpctest.Harness and returns a BtcdBackendConfig for
@@ -102,8 +102,8 @@ func NewBackend(miner string, netParams *chaincfg.Params) (
 
 		// After shutting down the chain backend, we'll make a copy of
 		// the log file before deleting the temporary log dir.
-		logFile := logDir + "/" + netParams.Name + "/btcd.log"
-		err := CopyFile("./output_btcd_chainbackend.log", logFile)
+		logFile := logDir + "/" + netParams.Name + "/btgd.log"
+		err := CopyFile("./output_btgd_chainbackend.log", logFile)
 		if err != nil {
 			fmt.Printf("unable to copy file: %v\n", err)
 		}

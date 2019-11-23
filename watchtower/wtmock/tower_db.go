@@ -4,8 +4,8 @@ import (
 	"sync"
 
 	"github.com/BTCGPU/lnd/chainntnfs"
-	"github.com/BTCGPU/lnd/watchtower/wtdb"
 	"github.com/BTCGPU/lnd/watchtower/blob"
+	"github.com/BTCGPU/lnd/watchtower/wtdb"
 )
 
 // TowerDB is a mock, in-memory implementation of a watchtower.DB.

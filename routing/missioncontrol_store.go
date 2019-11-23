@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/btgsuite/btgd/wire"
-	"github.com/coreos/bbolt"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/btgsuite/btgd/wire"
+	"github.com/coreos/bbolt"
 )
 
 var (

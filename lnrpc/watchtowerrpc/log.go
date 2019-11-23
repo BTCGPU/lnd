@@ -1,8 +1,8 @@
 package watchtowerrpc
 
 import (
-	"github.com/btcsuite/btclog"
 	"github.com/BTCGPU/lnd/build"
+	"github.com/btcsuite/btclog"
 )
 
 // Subsystem defines the logging code for this subsystem.

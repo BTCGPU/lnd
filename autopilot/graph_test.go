@@ -3,8 +3,8 @@ package autopilot_test
 import (
 	"testing"
 
-	btcutil "github.com/btgsuite/btgutil"
 	"github.com/BTCGPU/lnd/autopilot"
+	btcutil "github.com/btgsuite/btgutil"
 )
 
 // TestMedian tests the Median method.

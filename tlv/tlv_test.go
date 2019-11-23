@@ -7,8 +7,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/btgsuite/btgd/btcec"
 	"github.com/BTCGPU/lnd/tlv"
+	"github.com/btgsuite/btgd/btcec"
 )
 
 type nodeAmts struct {

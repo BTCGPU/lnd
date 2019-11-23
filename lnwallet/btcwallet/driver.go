@@ -3,8 +3,8 @@ package btcwallet
 import (
 	"fmt"
 
-	"github.com/btgsuite/btgwallet/chain"
 	"github.com/BTCGPU/lnd/lnwallet"
+	"github.com/btgsuite/btgwallet/chain"
 )
 
 const (

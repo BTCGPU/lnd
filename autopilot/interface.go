@@ -3,10 +3,10 @@ package autopilot
 import (
 	"net"
 
+	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
-	"github.com/BTCGPU/lnd/lnwire"
 )
 
 // DefaultConfTarget is the default confirmation target for autopilot channels.

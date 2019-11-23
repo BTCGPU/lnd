@@ -3,12 +3,12 @@
 package invoicesrpc
 
 import (
-	"github.com/btgsuite/btgd/chaincfg"
 	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/BTCGPU/lnd/invoices"
 	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/BTCGPU/lnd/macaroons"
 	"github.com/BTCGPU/lnd/netann"
+	"github.com/btgsuite/btgd/chaincfg"
 )
 
 // Config is the primary configuration struct for the invoices RPC server. It

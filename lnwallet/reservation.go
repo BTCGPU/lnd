@@ -4,13 +4,13 @@ import (
 	"net"
 	"sync"
 
+	"github.com/BTCGPU/lnd/channeldb"
+	"github.com/BTCGPU/lnd/input"
+	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
-	"github.com/BTCGPU/lnd/channeldb"
-	"github.com/BTCGPU/lnd/input"
-	"github.com/BTCGPU/lnd/lnwire"
 )
 
 // ChannelContribution is the primary constituent of the funding workflow
@@ -132,7 +132,6 @@ func NewChannelReservation(capacity, localFundingAmt btcutil.Amount,
 	id uint64, pushMSat lnwire.MilliSatoshi, chainHash *chainhash.Hash,
 	flags lnwire.FundingFlag,
 	tweaklessCommit bool) (*ChannelReservation, error) {
-
 	var (
 		ourBalance   lnwire.MilliSatoshi
 		theirBalance lnwire.MilliSatoshi

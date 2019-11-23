@@ -11,12 +11,12 @@ import (
 	"testing"
 
 	"github.com/BTCGPU/lnd/lnwire"
-	"github.com/btgsuite/btgd/btcec"
 	"github.com/BTCGPU/lnd/watchtower/blob"
 	"github.com/BTCGPU/lnd/watchtower/wtclient"
 	"github.com/BTCGPU/lnd/watchtower/wtdb"
 	"github.com/BTCGPU/lnd/watchtower/wtmock"
 	"github.com/BTCGPU/lnd/watchtower/wtpolicy"
+	"github.com/btgsuite/btgd/btcec"
 )
 
 // clientDBInit is a closure used to initialize a wtclient.DB instance its

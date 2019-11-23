@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/BTCGPU/lnd/input"
+	"github.com/BTCGPU/lnd/lnwallet"
 	"github.com/btgsuite/btgd/blockchain"
 	"github.com/btgsuite/btgd/txscript"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/btgsuite/btgwallet/wallet/txrules"
-	"github.com/BTCGPU/lnd/input"
-	"github.com/BTCGPU/lnd/lnwallet"
 )
 
 var (

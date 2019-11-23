@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/wire"
 	"github.com/BTCGPU/lnd/input"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/wire"
 )
 
 const (

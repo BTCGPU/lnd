@@ -8,8 +8,8 @@ import (
 
 	"github.com/BTCGPU/lnd/lnrpc"
 
-	"github.com/btgsuite/btgd/btcec"
 	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/btgsuite/btgd/btcec"
 )
 
 func randKey(t *testing.T) *btcec.PublicKey {
@@ -34,7 +34,6 @@ var defaultAcceptTimeout = 5 * time.Second
 
 func acceptAndIncrementCtr(rpc ChannelAcceptor, req *ChannelAcceptRequest,
 	ctr *uint32, success chan struct{}) {
-
 	result := rpc.Accept(req)
 	if !result {
 		return
@@ -49,7 +48,6 @@ func acceptAndIncrementCtr(rpc ChannelAcceptor, req *ChannelAcceptRequest,
 // TestMultipleRPCClients tests that the RPCAcceptor is able to handle multiple
 // callers to its Accept method and respond to them correctly.
 func TestRPCMultipleAcceptClients(t *testing.T) {
-
 	var (
 		node = randKey(t)
 

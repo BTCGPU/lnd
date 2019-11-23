@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/BTCGPU/lnd/lnwire"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/wire"
 	"github.com/coreos/bbolt"
 	"github.com/go-errors/errors"
-	"github.com/BTCGPU/lnd/lnwire"
 )
 
 const (

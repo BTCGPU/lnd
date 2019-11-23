@@ -5,9 +5,9 @@ import (
 	"io/ioutil"
 	"testing"
 
+	"github.com/BTCGPU/lnd/channeldb"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/btgsuite/btgd/wire"
-	"github.com/BTCGPU/lnd/channeldb"
 )
 
 func initHintCache(t *testing.T) *HeightHintCache {

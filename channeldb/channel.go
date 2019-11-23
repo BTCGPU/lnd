@@ -11,15 +11,15 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/BTCGPU/lnd/input"
+	"github.com/BTCGPU/lnd/keychain"
+	"github.com/BTCGPU/lnd/lnwire"
+	"github.com/BTCGPU/lnd/shachain"
 	"github.com/btgsuite/btgd/btcec"
 	"github.com/btgsuite/btgd/chaincfg/chainhash"
 	"github.com/btgsuite/btgd/wire"
 	btcutil "github.com/btgsuite/btgutil"
 	"github.com/coreos/bbolt"
-	"github.com/BTCGPU/lnd/keychain"
-	"github.com/BTCGPU/lnd/input"
-	"github.com/BTCGPU/lnd/lnwire"
-	"github.com/BTCGPU/lnd/shachain"
 )
 
 var (
@@ -964,7 +964,6 @@ func (c *OpenChannel) BroadcastedCommitment() (*wire.MsgTx, error) {
 // extra information together with the new status.
 func (c *OpenChannel) putChanStatus(status ChannelStatus,
 	fs ...func(*bbolt.Bucket) error) error {
-
 	if err := c.Db.Update(func(tx *bbolt.Tx) error {
 		chanBucket, err := fetchChanBucket(
 			tx, c.IdentityPub, &c.FundingOutpoint, c.ChainHash,

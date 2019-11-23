@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/btgsuite/btgd/btcec"
-	"github.com/btgsuite/btgd/wire"
 	"github.com/BTCGPU/lnd/chanbackup"
 	"github.com/BTCGPU/lnd/channelnotifier"
+	"github.com/btgsuite/btgd/btcec"
+	"github.com/btgsuite/btgd/wire"
 )
 
 // addrSource is an interface that allow us to get the addresses for a target
