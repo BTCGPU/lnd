@@ -3,15 +3,15 @@
     * [Preliminaries](#preliminaries)
     * [Installing lnd](#installing-lnd)
 * [Available Backend Operating Modes](#available-backend-operating-modes)
-  * [btcd Options](#btcd-options)
+  * [btgd Options](#btgd-options)
   * [Neutrino Options](#neutrino-options)
-  * [Bitcoind Options](#bitcoind-options)
-  * [Using btcd](#using-btcd)
-    * [Installing btcd](#installing-btcd)
-    * [Starting btcd](#starting-btcd)
-    * [Running lnd using the btcd backend](#running-lnd-using-the-btcd-backend)
+  * [bgoldd Options](#bgoldd-options)
+  * [Using btgd](#using-btgd)
+    * [Installing btgd](#installing-btgd)
+    * [Starting btgd](#starting-btgd)
+    * [Running lnd using the btgd backend](#running-lnd-using-the-btgd-backend)
   * [Using Neutrino](#using-neutrino)
-  * [Using bitcoind or litecoind](#using-bitcoind-or-litecoind)
+  * [Using bgoldd or litecoind](#using-bgoldd-or-litecoind)
 * [Creating a Wallet](#creating-a-wallet)
 * [Macaroons](#macaroons)
 * [Network Reachability](#network-reachability)
@@ -162,9 +162,9 @@ make check
 
 In order to run, `lnd` requires, that the user specify a chain backend. At the
 time of writing of this document, there are three available chain backends:
-`btcd`, `neutrino`, `bitcoind`. All but neutrino (atm) can run on mainnet with
+`btgd`, `neutrino`, `bgoldd`. All but neutrino (atm) can run on mainnet with
 an out of the box `lnd` instance. We don't require `--txindex` when running
-with `bitcoind` or `btcd` but activating the `txindex` will generally make
+with `bgoldd` or `btgd` but activating the `txindex` will generally make
 `lnd` run faster.
 
 **NOTE: WE DO NOT FULLY SUPPORT PRUNED OPERATING MODES FOR FULL NODES.** It's
@@ -175,15 +175,15 @@ wallet, and the age of the earliest channels (which were created around March
 
 The set of arguments for each of the backend modes is as follows:
 
-## btcd Options
+## btgd Options
 ```
-btcd:
-      --btcd.dir=                                             The base directory that contains the node's data, logs, configuration file, etc. (default: /Users/roasbeef/Library/Application Support/Btcd)
-      --btcd.rpchost=                                         The daemon's rpc listening address. If a port is omitted, then the default port for the selected chain parameters will be used. (default: localhost)
-      --btcd.rpcuser=                                         Username for RPC connections
-      --btcd.rpcpass=                                         Password for RPC connections
-      --btcd.rpccert=                                         File containing the daemon's certificate file (default: /Users/roasbeef/Library/Application Support/Btcd/rpc.cert)
-      --btcd.rawrpccert=                                      The raw bytes of the daemon's PEM-encoded certificate chain which will be used to authenticate the RPC connection.
+btgd:
+      --btgd.dir=                                             The base directory that contains the node's data, logs, configuration file, etc. (default: /Users/roasbeef/Library/Application Support/btgd)
+      --btgd.rpchost=                                         The daemon's rpc listening address. If a port is omitted, then the default port for the selected chain parameters will be used. (default: localhost)
+      --btgd.rpcuser=                                         Username for RPC connections
+      --btgd.rpcpass=                                         Password for RPC connections
+      --btgd.rpccert=                                         File containing the daemon's certificate file (default: /Users/roasbeef/Library/Application Support/btgd/rpc.cert)
+      --btgd.rawrpccert=                                      The raw bytes of the daemon's PEM-encoded certificate chain which will be used to authenticate the RPC connection.
 ```
 
 ## Neutrino Options
@@ -196,41 +196,41 @@ neutrino:
       --neutrino.banthreshold=                                Maximum allowed ban score before disconnecting and banning misbehaving peers.
 ```
 
-## Bitcoind Options
+## bgoldd Options
 ```
-bitcoind:
-      --bitcoind.dir=                                         The base directory that contains the node's data, logs, configuration file, etc. (default: /Users/roasbeef/Library/Application Support/Bitcoin)
-      --bitcoind.rpchost=                                     The daemon's rpc listening address. If a port is omitted, then the default port for the selected chain parameters will be used. (default: localhost)
-      --bitcoind.rpcuser=                                     Username for RPC connections
-      --bitcoind.rpcpass=                                     Password for RPC connections
-      --bitcoind.zmqpubrawblock=                              The address listening for ZMQ connections to deliver raw block notifications
-      --bitcoind.zmqpubrawtx=                                 The address listening for ZMQ connections to deliver raw transaction notifications
+bgoldd:
+      --bgoldd.dir=                                         The base directory that contains the node's data, logs, configuration file, etc. (default: /Users/roasbeef/Library/Application Support/Bitcoin)
+      --bgoldd.rpchost=                                     The daemon's rpc listening address. If a port is omitted, then the default port for the selected chain parameters will be used. (default: localhost)
+      --bgoldd.rpcuser=                                     Username for RPC connections
+      --bgoldd.rpcpass=                                     Password for RPC connections
+      --bgoldd.zmqpubrawblock=                              The address listening for ZMQ connections to deliver raw block notifications
+      --bgoldd.zmqpubrawtx=                                 The address listening for ZMQ connections to deliver raw transaction notifications
 ```
 
-## Using btcd
+## Using btgd
 
-### Installing btcd
+### Installing btgd
 
 On FreeBSD, use gmake instead of make.
 
-To install btcd, run the following commands:
+To install btgd, run the following commands:
 
-Install **btcd**:
+Install **btgd**:
 ```
-make btcd
+make btgd
 ```
 
-Alternatively, you can install [`btcd` directly from its
+Alternatively, you can install [`btgd` directly from its
 repo](https://github.com/btgsuite/btgd).
 
-### Starting btcd
+### Starting btgd
 
-Running the following command will create `rpc.cert` and default `btcd.conf`.
+Running the following command will create `rpc.cert` and default `btgd.conf`.
 
 ```
-btcd --testnet --rpcuser=REPLACEME --rpcpass=REPLACEME
+btgd --testnet --rpcuser=REPLACEME --rpcpass=REPLACEME
 ```
-If you want to use `lnd` on testnet, `btcd` needs to first fully sync the
+If you want to use `lnd` on testnet, `btgd` needs to first fully sync the
 testnet blockchain. Depending on your hardware, this may take up to a few
 hours. Note that adding `--txindex` is optional, as it will take longer to sync
 the node, but then `lnd` will generally operate faster as it can hit the index
@@ -238,7 +238,7 @@ directly, rather than scanning blocks or BIP 158 filters for relevant items.
 
 (NOTE: It may take several minutes to find segwit-enabled peers.)
 
-While `btcd` is syncing you can check on its progress using btcd's `getinfo`
+While `btgd` is syncing you can check on its progress using btgd's `getinfo`
 RPC command:
 ```
 btcctl --testnet --rpcuser=REPLACEME --rpcpass=REPLACEME getinfo
@@ -256,22 +256,22 @@ btcctl --testnet --rpcuser=REPLACEME --rpcpass=REPLACEME getinfo
 }
 ```
 
-Additionally, you can monitor btcd's logs to track its syncing progress in real
+Additionally, you can monitor btgd's logs to track its syncing progress in real
 time.
 
-You can test your `btcd` node's connectivity using the `getpeerinfo` command:
+You can test your `btgd` node's connectivity using the `getpeerinfo` command:
 ```
 btcctl --testnet --rpcuser=REPLACEME --rpcpass=REPLACEME getpeerinfo | more
 ```
 
-### Running lnd using the btcd backend
+### Running lnd using the btgd backend
 
-If you are on testnet, run this command after `btcd` has finished syncing.
+If you are on testnet, run this command after `btgd` has finished syncing.
 Otherwise, replace `--bitcoin.testnet` with `--bitcoin.simnet`. If you are
 installing `lnd` in preparation for the
 [tutorial](https://dev.lightning.community/tutorial), you may skip this step.
 ```
-lnd --bitcoin.active --bitcoin.testnet --debuglevel=debug --btcd.rpcuser=kek --btcd.rpcpass=kek --externalip=X.X.X.X
+lnd --bitcoin.active --bitcoin.testnet --debuglevel=debug --btgd.rpcuser=kek --btgd.rpcpass=kek --externalip=X.X.X.X
 ```
 
 ## Using Neutrino
@@ -284,41 +284,41 @@ mode.  A public instance of such a node can be found at
 `faucet.lightning.community`.
 
 To run lnd in neutrino mode, run `lnd` with the following arguments, (swapping
-in `--bitcoin.simnet` if needed), and also your own `btcd` node if available:
+in `--bitcoin.simnet` if needed), and also your own `btgd` node if available:
 ```
 lnd --bitcoin.active --bitcoin.testnet --debuglevel=debug --bitcoin.node=neutrino --neutrino.connect=faucet.lightning.community
 ```
 
 
-## Using bitcoind or litecoind
+## Using bgoldd or litecoind
 
-The configuration for bitcoind and litecoind are nearly identical, the
+The configuration for bgoldd and litecoind are nearly identical, the
 following steps can be mirrored with loss of generality to enable a litecoind
-backend.  Setup will be described in regards to `bitcoind`, but note that `lnd`
+backend.  Setup will be described in regards to `bgoldd`, but note that `lnd`
 uses a distinct `litecoin.node=litecoind` argument and analogous
 subconfigurations prefixed by `litecoind`. Note that adding `--txindex` is
 optional, as it will take longer to sync the node, but then `lnd` will
 generally operate faster as it can hit the index directly, rather than scanning
 blocks or BIP 158 filters for relevant items.
 
-To configure your bitcoind backend for use with lnd, first complete and verify
+To configure your bgoldd backend for use with lnd, first complete and verify
 the following:
 
 - Since `lnd` uses
   [ZeroMQ](https://github.com/bitcoin/bitcoin/blob/master/doc/zmq.md) to
-  interface with `bitcoind`, *your `bitcoind` installation must be compiled with
-  ZMQ*. Note that if you installed `bitcoind` from source and ZMQ was not present, 
+  interface with `bgoldd`, *your `bgoldd` installation must be compiled with
+  ZMQ*. Note that if you installed `bgoldd` from source and ZMQ was not present, 
   then ZMQ support will be disabled, and `lnd` will quit on a `connection refused` error. 
-  If you installed `bitcoind` via Homebrew in the past ZMQ may not be included 
+  If you installed `bgoldd` via Homebrew in the past ZMQ may not be included 
   ([this has now been fixed](https://github.com/Homebrew/homebrew-core/pull/23088) 
   in the latest Homebrew recipe for bitcoin)
-- Configure the `bitcoind` instance for ZMQ with `--zmqpubrawblock` and
+- Configure the `bgoldd` instance for ZMQ with `--zmqpubrawblock` and
   `--zmqpubrawtx`. These options must each use their own unique address in order
   to provide a reliable delivery of notifications (e.g.
   `--zmqpubrawblock=tcp://127.0.0.1:28332` and
   `--zmqpubrawtx=tcp://127.0.0.1:28333`).
-- Start `bitcoind` running against testnet, and let it complete a full sync with
-  the testnet chain (alternatively, use `--bitcoind.regtest` instead).
+- Start `bgoldd` running against testnet, and let it complete a full sync with
+  the testnet chain (alternatively, use `--bgoldd.regtest` instead).
 
 Here's a sample `bitcoin.conf` for use with lnd:
 ```
@@ -329,39 +329,39 @@ zmqpubrawblock=tcp://127.0.0.1:28332
 zmqpubrawtx=tcp://127.0.0.1:28333
 ```
 
-Once all of the above is complete, and you've confirmed `bitcoind` is fully
+Once all of the above is complete, and you've confirmed `bgoldd` is fully
 updated with the latest blocks on testnet, run the command below to launch
-`lnd` with `bitcoind` as your backend (as with `bitcoind`, you can create an
+`lnd` with `bgoldd` as your backend (as with `bgoldd`, you can create an
 `lnd.conf` to save these options, more info on that is described further
 below):
 
 ```
-lnd --bitcoin.active --bitcoin.testnet --debuglevel=debug --bitcoin.node=bitcoind --bitcoind.rpcuser=REPLACEME --bitcoind.rpcpass=REPLACEME --bitcoind.zmqpubrawblock=tcp://127.0.0.1:28332 --bitcoind.zmqpubrawtx=tcp://127.0.0.1:28333 --externalip=X.X.X.X
+lnd --bitcoin.active --bitcoin.testnet --debuglevel=debug --bitcoin.node=bgoldd --bgoldd.rpcuser=REPLACEME --bgoldd.rpcpass=REPLACEME --bgoldd.zmqpubrawblock=tcp://127.0.0.1:28332 --bgoldd.zmqpubrawtx=tcp://127.0.0.1:28333 --externalip=X.X.X.X
 ```
 
 *NOTE:*
 - The auth parameters `rpcuser` and `rpcpass` parameters can typically be
-  determined by `lnd` for a `bitcoind` instance running under the same user,
+  determined by `lnd` for a `bgoldd` instance running under the same user,
   including when using cookie auth. In this case, you can exclude them from the
   `lnd` options entirely.
 - If you DO choose to explicitly pass the auth parameters in your `lnd.conf` or
-  command line options for `lnd` (`bitcoind.rpcuser` and `bitcoind.rpcpass` as
+  command line options for `lnd` (`bgoldd.rpcuser` and `bgoldd.rpcpass` as
   shown in example command above), you must also specify the
-  `bitcoind.zmqpubrawblock` and `bitcoind.zmqpubrawtx` options. Otherwise, `lnd`
+  `bgoldd.zmqpubrawblock` and `bgoldd.zmqpubrawtx` options. Otherwise, `lnd`
   will attempt to get the configuration from your `bitcoin.conf`.
-- You must ensure the same addresses are used for the `bitcoind.zmqpubrawblock`
-  and `bitcoind.zmqpubrawtx` options passed to `lnd` as for the `zmqpubrawblock`
-  and `zmqpubrawtx` passed in the `bitcoind` options respectively.
-- When running lnd and bitcoind on the same Windows machine, ensure you use
+- You must ensure the same addresses are used for the `bgoldd.zmqpubrawblock`
+  and `bgoldd.zmqpubrawtx` options passed to `lnd` as for the `zmqpubrawblock`
+  and `zmqpubrawtx` passed in the `bgoldd` options respectively.
+- When running lnd and bgoldd on the same Windows machine, ensure you use
   127.0.0.1, not localhost, for all configuration options that require a TCP/IP
   host address.  If you use "localhost" as the host name, you may see extremely
-  slow inter-process-communication between lnd and the bitcoind backend.  If lnd
+  slow inter-process-communication between lnd and the bgoldd backend.  If lnd
   is experiencing this issue, you'll see "Waiting for chain backend to finish
   sync, start_height=XXXXXX" as the last entry in the console or log output, and
   lnd will appear to hang.  Normal lnd output will quickly show multiple
-  messages like this as lnd consumes blocks from bitcoind.
-- Don't connect more than two or three instances of `lnd` to `bitcoind`. With
-  the default `bitcoind` settings, having more than one instance of `lnd`, or
+  messages like this as lnd consumes blocks from bgoldd.
+- Don't connect more than two or three instances of `lnd` to `bgoldd`. With
+  the default `bgoldd` settings, having more than one instance of `lnd`, or
   `lnd` plus any application that consumes the RPC could cause `lnd` to miss
   crucial updates from the backend.
 
@@ -408,7 +408,7 @@ reachable IP address.
 # Simnet vs. Testnet Development
 
 If you are doing local development, such as for the tutorial, you'll want to
-start both `btcd` and `lnd` in the `simnet` mode. Simnet is similar to regtest
+start both `btgd` and `lnd` in the `simnet` mode. Simnet is similar to regtest
 in that you'll be able to instantly mine blocks as needed to test `lnd`
 locally. In order to start either daemon in the `simnet` mode use `simnet`
 instead of `testnet`, adding the `--bitcoin.simnet` flag instead of the
@@ -422,7 +422,7 @@ To send this "special" HTLC type, include the `--debugsend` command at the end
 of your `sendpayment` commands.
 
 
-There are currently two primary ways to run `lnd`: one requires a local `btcd`
+There are currently two primary ways to run `lnd`: one requires a local `btgd`
 instance with the RPC service exposed, and the other uses a fully integrated
 light client powered by [neutrino](https://github.com/BTCGPU/neutrino).
 
@@ -438,7 +438,7 @@ at the command line, you can create an `lnd.conf`.
 **On Linux, located at:**
 `~/.lnd/lnd.conf`
 
-Here's a sample `lnd.conf` for `btcd` to get you started:
+Here's a sample `lnd.conf` for `btgd` to get you started:
 ```
 [Application Options]
 debuglevel=trace
@@ -453,6 +453,6 @@ Bitcoin chain. `lnd` also supports Litecoin testnet4 (but not both BTC and LTC
 at the same time), so when working with Litecoin be sure to set to parameters
 for Litecoin accordingly. See a more detailed sample config file available
 [here](https://github.com/BTCGPU/lnd/blob/master/sample-lnd.conf)
-and explore the other sections for node configuration, including `[Btcd]`,
-`[Bitcoind]`, `[Neutrino]`, `[Ltcd]`, and `[Litecoind]` depending on which
+and explore the other sections for node configuration, including `[btgd]`,
+`[bgoldd]`, `[Neutrino]`, `[Ltcd]`, and `[Litecoind]` depending on which
 chain and node type you're using.

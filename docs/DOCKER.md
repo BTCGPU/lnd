@@ -11,7 +11,7 @@ To use Docker in a production environment, you can run `lnd` by first creating
 a Docker container, adding the appropriate command-line options as parameters.
 
 ```
-$ docker create --name=lnd BTCGPU/lnd [command-line options]
+$ docker create --name=lnd bitcoingold/lnd [command-line options]
 ```
 
 Then, just start the container:
@@ -28,7 +28,7 @@ persist through container restarts.
 You can also optionally manually specify a local folder to be used as a volume:
 
 ```
-$ docker create --name=lnd -v /media/lnd-docker/:/root/.lnd btcgpu/lnd [command-line options]
+$ docker create --name=lnd -v /media/lnd-docker/:/root/.lnd bitcoingold/lnd [command-line options]
 ```
 
 ## Example
@@ -36,7 +36,7 @@ $ docker create --name=lnd -v /media/lnd-docker/:/root/.lnd btcgpu/lnd [command-
 Here is an example testnet `lnd` that uses Neutrino:
 
 ```
-$ docker create --name lnd-testnet btcgpu/lnd --bitcoingold.active --bitcoingold.testnet --bitcoingold.node=neutrino --neutrino.connect=faucet.lightning.community
+$ docker create --name lnd-testnet bitcoingold/lnd --bitcoingold.active --bitcoingold.testnet --bitcoingold.node=neutrino --neutrino.connect=faucet.lightning.community
 ```
 
 Start the container:
